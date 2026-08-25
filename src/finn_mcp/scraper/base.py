@@ -11,6 +11,23 @@ from .. import http_client
 from ..models import Listing, SearchResult, Vertical
 
 _WHITESPACE_RE = re.compile(r"\s+")
+_BLOCK_MARKERS = (
+    "captcha",
+    "access denied",
+    "unusual traffic",
+    "verify you are human",
+    "tilgang nektet",
+)
+
+
+class PageBlockedError(RuntimeError):
+    pass
+
+
+def validate_page(html: str) -> None:
+    sample = html[:100_000].lower()
+    if len(html.strip()) < 100 or any(marker in sample for marker in _BLOCK_MARKERS):
+        raise PageBlockedError("finn.no returned a block, CAPTCHA, or incomplete page")
 
 
 def _clean(text: str | None) -> str | None:
@@ -93,12 +110,16 @@ class VerticalScraper(ABC):
     ) -> list[SearchResult]:
         url, params = self.search_url(query, page, filters)
         html = await http_client.fetch(url, params=params)
+        validate_page(html)
         return self.parse_search_cards(html)
 
     async def fetch_detail(self, finnkode: str) -> tuple[str, Listing]:
         url = self.detail_url(finnkode)
         html = await http_client.fetch(url)
+        validate_page(html)
         listing = self.parse_detail(finnkode, html)
+        if not listing.title or listing.title.endswith(f"listing {finnkode}"):
+            raise ValueError("listing page did not contain the required title")
         return html, listing
 
     def parse_search_cards(self, html: str) -> list[SearchResult]:
