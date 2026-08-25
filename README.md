@@ -1,5 +1,11 @@
 # finn-mcp
 
+> **This is a fork of [aHk-coder/finn-mcp](https://github.com/aHk-coder/finn-mcp).**
+> The server, its architecture and all four verticals are that project's work,
+> by [aHk-coder](https://github.com/aHk-coder), under the MIT licence. This fork
+> adapts it for unattended operation and fixes a parser that finn.no broke.
+> It is not a rewrite and not an original project.
+
 MCP server that exposes [finn.no](https://www.finn.no) — Norway's largest
 online classifieds marketplace — to Claude across four verticals:
 
@@ -8,30 +14,86 @@ online classifieds marketplace — to Claude across four verticals:
 - **Cars** — used (new cars are only available via the official API)
 - **Jobs** — full-time listings
 
+## What this fork changes
+
+The server has been running continuously in a container on a NAS, behind a
+reverse proxy, answering job-ad queries for a production application. Nearly
+everything below comes from that: things that only surface once software runs
+unattended for weeks rather than in a terminal for an afternoon.
+
+- **Job ads read from the DOM when the JSON-LD disappears.** Since around
+  April 2026 finn.no stopped shipping a schema.org `JobPosting` on job ads.
+  Every job listing came back with `description=None` while the text sat in
+  the markup, and that failure was indistinguishable from an ad that really
+  had no description. JSON-LD is still tried first.
+- **Requests bounded per minute, not just serialized** — see the credit note
+  below; this one is a strengthening rather than an addition.
+- **The cache no longer grows without limit.** Expired rows are swept, the
+  file is capped, and saved-search history is bounded.
+- **Raw HTML is no longer stored by default.** Every fetched page used to be
+  persisted in full and kept indefinitely, which accumulated other people's ad
+  text and contact details on disk. Now opt-in via `FINN_CACHE_RAW_HTML`.
+- **Block pages fail loudly.** A CAPTCHA or "tilgang nektet" interstitial is
+  valid HTML, so it used to parse to an empty result list — indistinguishable
+  from a search with no matches, and the natural retry made things worse.
+- **`get_listing` accepts a finn.no URL** and takes the vertical from its
+  path, instead of probing up to five verticals to find out.
+- **Search arguments are validated** before they become a finn.no query
+  string, because the caller is a language model rather than a form.
+- **Operational limits are environment variables**, so retuning them does not
+  mean rebuilding the container image.
+- **Four operational tools** — `get_server_status`, `clear_cache`,
+  `export_saved_searches`, `import_saved_searches`.
+- **Seven tests and one fixture**, including the real job ad that broke the
+  parser, so the regression is caught rather than remembered.
+
+### Credit where it is due
+
+**Rate limiting was already here.** The upstream project had `RateLimitedError`,
+a semaphore serializing requests, and a polite randomized delay between them.
+Saying this fork "added rate limiting" would be false.
+
+What it adds is a sliding window that enforces a request-per-minute ceiling —
+a semaphore bounds how many requests are in flight, which is not the same as
+how many are sent per minute — plus exponential backoff, retries on network
+errors, and reading the actual `Retry-After` header instead of assuming 60
+seconds.
+
+Equally: the scraper architecture, the `FinnBackend` seam, the JSON-LD
+parsing, the SQLite cache, saved searches and the original six MCP tools are
+all upstream work. This fork did not design any of it.
+
 ## Tools
 
 | Tool | Purpose |
 |------|---------|
 | `search_finn` | Search a vertical by keyword + optional filters. |
-| `get_listing` | Fetch a full listing by `finnkode`. |
+| `get_listing` | Fetch a full listing by `finnkode` or finn.no URL. |
 | `save_search` | Persist a named recurring search. |
 | `list_saved_searches` | List all saved searches. |
 | `delete_saved_search` | Remove a saved search. |
 | `check_saved_search` | Run a saved search and return only hits that are new since the last check. |
+| `clear_cache` | Delete cached listings while preserving saved searches. |
+| `get_server_status` | Show backend, privacy, cache, and rate-limit settings. |
+| `export_saved_searches` | Export portable saved-search data. |
+| `import_saved_searches` | Restore exported saved searches. |
 
-## Install & run (recommended)
+## Install & run
 
-Requires [uv](https://docs.astral.sh/uv/). Then use `uvx` to run the server
-without cloning or installing anything permanently:
+Requires [uv](https://docs.astral.sh/uv/). To run **this fork** without
+cloning or installing anything permanently:
 
 ```bash
-uvx finn-mcp
+uvx --from git+https://github.com/tomaszmroczynski/finn-mcp finn-mcp
 ```
+
+Note that plain `uvx finn-mcp` installs the upstream package from PyPI, which
+is the original project and does not contain the changes listed above.
 
 ## Register with Claude Code
 
 ```bash
-claude mcp add finn-mcp -- uvx finn-mcp
+claude mcp add finn-mcp -- uvx --from git+https://github.com/tomaszmroczynski/finn-mcp finn-mcp
 ```
 
 Or add to your `.mcp.json` (or Claude Desktop's `claude_desktop_config.json`):
@@ -41,7 +103,11 @@ Or add to your `.mcp.json` (or Claude Desktop's `claude_desktop_config.json`):
   "mcpServers": {
     "finn-mcp": {
       "command": "uvx",
-      "args": ["finn-mcp"]
+      "args": [
+        "--from",
+        "git+https://github.com/tomaszmroczynski/finn-mcp",
+        "finn-mcp"
+      ]
     }
   }
 }
@@ -60,14 +126,31 @@ Backend selection is controlled by the `FINN_BACKEND` environment variable:
 - `FINN_BACKEND=official` — stub; raises `NotImplementedError` until
   partner credentials are wired up.
 
-Responses are cached for 24 hours in a local SQLite database at
+Parsed responses are cached for 24 hours in a local SQLite database at
 `$XDG_DATA_HOME/finn-mcp/cache.sqlite` (defaults to
-`~/.local/share/finn-mcp/cache.sqlite`).
+`~/.local/share/finn-mcp/cache.sqlite`). Raw HTML is not stored by default.
+Set `FINN_CACHE_RAW_HTML=1` only for local debugging.
+
+The scraper serializes requests, defaults to 20 requests per minute, honors
+`Retry-After`, and retries temporary network/5xx failures with exponential
+backoff. Relevant settings can be adjusted with:
+
+- `FINN_REQUESTS_PER_MINUTE` (default `20`)
+- `FINN_HTTP_MAX_RETRIES` (default `3`)
+- `FINN_HTTP_TIMEOUT_SECONDS` (default `15`)
+- `FINN_MAX_SAVED_FINNKODES` (default `1000`)
+- `FINN_MAX_CACHE_BYTES` (default `262144000`, or 250 MiB)
+
+`get_listing` accepts either a finnkode or a full `finn.no` listing URL.
+Providing a URL or explicit vertical avoids category-probing requests.
+
+This is an unofficial scraper, not a FINN.no product. Confirm that your use
+complies with FINN.no's current terms before sustained or commercial use.
 
 ## Develop from source
 
 ```bash
-git clone https://github.com/aHk-coder/finn-mcp
+git clone https://github.com/tomaszmroczynski/finn-mcp
 cd finn-mcp
 uv sync
 uv run pytest
@@ -75,8 +158,11 @@ uv run finn-mcp   # stdio server
 ```
 
 Tests run against saved HTML fixtures in `tests/fixtures/` and do not hit
-finn.no over the network.
+finn.no over the network. The contact name in the job-ad fixture has been
+replaced with a placeholder; no assertion depends on it.
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+MIT, unchanged from upstream. See [LICENSE](./LICENSE). Copyright for the
+original work remains with its authors; the changes described above are
+contributed under the same licence.

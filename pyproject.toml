@@ -6,7 +6,8 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
-    { name = "aHk-coder", email = "alhjakri@pm.me" }
+    { name = "aHk-coder", email = "alhjakri@pm.me" },
+    { name = "Tomasz Mroczyński" }
 ]
 requires-python = ">=3.11"
 keywords = ["mcp", "claude", "finn.no", "classifieds", "norway", "scraper"]
@@ -27,9 +28,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/aHk-coder/finn-mcp"
-Repository = "https://github.com/aHk-coder/finn-mcp"
-Issues = "https://github.com/aHk-coder/finn-mcp/issues"
+Homepage = "https://github.com/tomaszmroczynski/finn-mcp"
+Repository = "https://github.com/tomaszmroczynski/finn-mcp"
+Issues = "https://github.com/tomaszmroczynski/finn-mcp/issues"
+Upstream = "https://github.com/aHk-coder/finn-mcp"
 
 [project.scripts]
 finn-mcp = "finn_mcp.server:main"
