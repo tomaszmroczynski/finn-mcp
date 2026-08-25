@@ -128,3 +128,128 @@ def find_search_payload(html: str, search_key_prefix: str | None) -> SearchPaylo
                 search_key=key,
             )
     return None
+
+
+# Not a filter the caller can choose -- it is the query they already typed.
+_NON_FILTER_TYPES = {"QUERY_FILTER"}
+
+
+def _option(item: dict[str, Any]) -> dict[str, Any]:
+    children = item.get("filter_items")
+    out: dict[str, Any] = {
+        "value": item.get("value"),
+        "label": item.get("display_name"),
+    }
+    hits = item.get("hits")
+    # finn.no uses -1 for "not counted" rather than omitting the field.
+    if isinstance(hits, int) and hits >= 0:
+        out["hits"] = hits
+    if item.get("selected"):
+        out["selected"] = True
+    if isinstance(children, list) and children:
+        out["narrows_further"] = len(children)
+    return out
+
+
+def _find_by_value(items: list[Any], value: str) -> dict[str, Any] | None:
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("value")) == value:
+            return item
+        children = item.get("filter_items")
+        if isinstance(children, list):
+            found = _find_by_value(children, value)
+            if found is not None:
+                return found
+    return None
+
+
+def summarize_filters(
+    payload: SearchPayload,
+    filter_name: str | None = None,
+    value: str | None = None,
+    max_items: int = 25,
+) -> dict[str, Any]:
+    """Describe what can be filtered, in a form that fits in a reply.
+
+    finn.no's filter tree is not something to hand over whole: the location
+    branch alone is every municipality in Norway, three levels deep. So the
+    overview lists filter names and how many options each has, and naming one
+    expands just that filter, one level down, biggest first.
+
+    Hit counts come along because they tell a caller which branches are worth
+    taking -- and which would return nothing.
+    """
+    overview: list[dict[str, Any]] = []
+    for entry in payload.filters:
+        if not isinstance(entry, dict) or entry.get("type") in _NON_FILTER_TYPES:
+            continue
+        name = entry.get("name")
+        items = entry.get("filter_items")
+        if not isinstance(name, str) or not isinstance(items, list):
+            continue
+
+        if filter_name is None:
+            overview.append(
+                {"name": name, "label": entry.get("display_name"), "options": len(items)}
+            )
+            continue
+
+        if name != filter_name:
+            continue
+
+        # A level offering a single option is not a choice. Location opens on
+        # "Norge" alone with the counties underneath it, so expanding one
+        # level would hand the caller a dead end. Descend until there is
+        # something to pick between, and say what was skipped.
+        path: list[str] = []
+        items = [i for i in items if isinstance(i, dict)]
+
+        # Drilling into a named option. Location is three levels deep --
+        # country, county, municipality -- and a caller that can only see the
+        # top of it cannot narrow anything down.
+        if value is not None:
+            node = _find_by_value(items, value)
+            if node is None:
+                return {"error": "unknown_value", "name": name, "value": value}
+            children = node.get("filter_items")
+            if not isinstance(children, list) or not children:
+                return {
+                    "name": name,
+                    "label": entry.get("display_name"),
+                    "within": [str(node.get("display_name"))],
+                    "options": [],
+                    "message": "this option narrows no further",
+                }
+            path.append(str(node.get("display_name")))
+            items = [i for i in children if isinstance(i, dict)]
+        while len(items) == 1 and isinstance(items[0].get("filter_items"), list) and items[0]["filter_items"]:
+            path.append(str(items[0].get("display_name")))
+            items = [i for i in items[0]["filter_items"] if isinstance(i, dict)]
+
+        options = [_option(i) for i in items]
+        # Selected branches are kept whatever the cut-off, so a caller never
+        # loses sight of the filter it is already inside.
+        chosen = [o for o in options if o.get("selected")]
+        rest = sorted(
+            (o for o in options if not o.get("selected")),
+            key=lambda o: o.get("hits", 0),
+            reverse=True,
+        )
+        shown = chosen + rest[: max(0, max_items - len(chosen))]
+        result: dict[str, Any] = {
+            "name": name,
+            "label": entry.get("display_name"),
+            "options": shown,
+        }
+        if path:
+            result["within"] = path
+        dropped = len(options) - len(shown)
+        if dropped > 0:
+            result["not_shown"] = dropped
+        return result
+
+    if filter_name is not None:
+        return {"error": "unknown_filter", "name": filter_name}
+    return {"filters": overview}

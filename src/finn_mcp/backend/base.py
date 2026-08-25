@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from ..models import Listing, SearchResponse, Vertical
 
@@ -37,6 +38,18 @@ class FinnBackend(ABC):
         vertical: Vertical | None = None,
     ) -> Listing:
         ...
+
+    async def discover_filters(
+        self,
+        vertical: Vertical,
+        query: str = "",
+        filters: dict[str, str] | None = None,
+        filter_name: str | None = None,
+        value: str | None = None,
+        max_items: int = 25,
+    ) -> dict[str, Any]:
+        """Describe the filters finn.no offers for this search."""
+        raise NotImplementedError(f"{self.name} backend cannot describe filters")
 
     async def aclose(self) -> None:
         """Release any resources held by the backend."""

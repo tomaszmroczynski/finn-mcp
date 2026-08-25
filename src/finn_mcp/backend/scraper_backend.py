@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .. import config, http_client
@@ -77,6 +78,24 @@ class ScraperBackend(FinnBackend):
             raise ValueError("invalid filter key or value")
         scraper = get_scraper(vertical)
         return await scraper.search(query=query, page=page, filters=filters)
+
+    async def discover_filters(
+        self,
+        vertical: Vertical,
+        query: str = "",
+        filters: dict[str, str] | None = None,
+        filter_name: str | None = None,
+        value: str | None = None,
+        max_items: int = 25,
+    ) -> dict[str, Any]:
+        if vertical not in ALL_VERTICALS:
+            raise ValueError(f"unknown vertical: {vertical}")
+        if len(query) > config.MAX_QUERY_LENGTH:
+            raise ValueError(f"query exceeds {config.MAX_QUERY_LENGTH} characters")
+        return await get_scraper(vertical).discover_filters(
+            query, filters=filters, filter_name=filter_name, value=value,
+            max_items=max(1, min(100, max_items)),
+        )
 
     async def get_listing(
         self,

@@ -93,6 +93,43 @@ async def get_listing(
 
 
 @mcp.tool()
+async def discover_filters(
+    vertical: Vertical,
+    query: str = "",
+    filters: dict[str, str] | None = None,
+    filter_name: str | None = None,
+    value: str | None = None,
+    max_items: int = 25,
+) -> dict[str, Any]:
+    """Ask finn.no which filters apply to a search, instead of guessing them.
+
+    ``search_finn`` takes finn.no's own filter parameters, which are not
+    guessable: locations are codes like ``1.20001.22042``, and each vertical
+    has its own set. Call this first to find out what exists.
+
+    With no ``filter_name`` you get the list of available filters and how many
+    options each has. Naming one expands it, largest first, with the number of
+    ads behind each option -- so an option with no hits can be avoided rather
+    than tried.
+
+    Costs one request. Not available for ``homes`` and ``lettings``: finn.no
+    does not ship filter data on those pages.
+    """
+    try:
+        return await _backend().discover_filters(
+            vertical, query, filters=filters,
+            filter_name=filter_name, value=value, max_items=max_items,
+        )
+    except NotImplementedError as exc:
+        return {"error": "not_supported", "message": str(exc)}
+    except http_client.RateLimitedError as exc:
+        return {"error": "rate_limited", "retry_after": exc.retry_after}
+    except Exception as exc:
+        log.exception("discover_filters failed")
+        return {"error": "parse_failed", "message": str(exc)}
+
+
+@mcp.tool()
 async def save_search(
     name: str,
     vertical: Vertical,

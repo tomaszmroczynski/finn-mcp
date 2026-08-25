@@ -185,3 +185,84 @@ async def test_extraction_counts_show_which_path_answered(backends):
     assert count("homes", "cards") == before_homes + len(backends)
     # Nothing here should have pushed bap onto the card path.
     assert count("bap", "cards") == before_bap_cards
+
+
+# ---------- filter discovery ----------
+
+async def test_discover_filters_lists_what_can_be_filtered(backends):
+    for backend in backends:
+        summary = await backend.discover_filters("jobs", query="developer")
+        names = {f["name"] for f in summary["filters"]}
+        # Things a caller could never guess the parameter name for.
+        assert {"location", "occupation", "home_office", "working_language"} <= names
+        assert "q" not in names, "the query is not a filter to choose"
+        assert summary["total_matches"] == 7237
+
+
+async def test_discover_filters_expands_one_filter_with_hit_counts(backends):
+    for backend in backends:
+        summary = await backend.discover_filters(
+            "jobs", query="developer", filter_name="location", max_items=5
+        )
+        assert summary["name"] == "location"
+        options = summary["options"]
+        assert len(options) <= 5
+        assert options[0]["value"] and options[0]["label"]
+        assert options[0]["hits"] > 0
+        # Sorted by hits, so the useful branches come first.
+        hits = [o["hits"] for o in options if "hits" in o]
+        assert hits == sorted(hits, reverse=True)
+
+
+async def test_discover_filters_drills_into_a_named_option(backends):
+    """Location is country, county, municipality.
+
+    Expanding the filter shows Norge and Utlandet, which narrows nothing on
+    its own -- the counties are a level down, and there has to be a way in.
+    """
+    for backend in backends:
+        top = await backend.discover_filters(
+            "jobs", query="developer", filter_name="location"
+        )
+        norway = next(o for o in top["options"] if o["label"] == "Norge")
+        assert norway["narrows_further"] == 16
+
+        counties = await backend.discover_filters(
+            "jobs", query="developer", filter_name="location", value=norway["value"]
+        )
+        assert counties["within"] == ["Norge"]
+        assert len(counties["options"]) == 16
+        assert any(o["label"] == "Agder" for o in counties["options"])
+
+
+async def test_discover_filters_says_when_it_truncated(backends):
+    for backend in backends:
+        summary = await backend.discover_filters(
+            "jobs", query="developer", filter_name="location",
+            value="0.20001", max_items=3,
+        )
+        assert len(summary["options"]) == 3
+        assert summary["not_shown"] == 13, "silent truncation reads as completeness"
+
+
+async def test_discover_filters_rejects_an_unknown_value(backends):
+    for backend in backends:
+        summary = await backend.discover_filters(
+            "jobs", query="developer", filter_name="location", value="9.99999"
+        )
+        assert summary["error"] == "unknown_value"
+
+
+async def test_discover_filters_is_honest_about_real_estate(backends):
+    """No embedded state means no filter data. Say so rather than return {}."""
+    for backend in backends:
+        summary = await backend.discover_filters("homes", query="oslo")
+        assert summary["error"] == "not_supported"
+
+
+async def test_discover_filters_rejects_an_unknown_filter(backends):
+    for backend in backends:
+        summary = await backend.discover_filters(
+            "jobs", query="developer", filter_name="nonsense"
+        )
+        assert summary["error"] == "unknown_filter"

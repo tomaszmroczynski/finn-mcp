@@ -186,6 +186,36 @@ class VerticalScraper(ABC):
             source="cards",
         )
 
+    async def discover_filters(
+        self,
+        query: str,
+        filters: dict[str, str] | None = None,
+        filter_name: str | None = None,
+        value: str | None = None,
+        max_items: int = 25,
+    ) -> dict[str, Any]:
+        """Ask finn.no what can be filtered on this search.
+
+        Costs one request -- the same search, read for its filter tree rather
+        than its results. Verticals without embedded state cannot answer.
+        """
+        if self.search_key_prefix is None:
+            return {
+                "error": "not_supported",
+                "vertical": self.vertical,
+                "message": "finn.no ships no filter data for this vertical",
+            }
+        url, params = self.search_url(query, 1, filters)
+        html = await http_client.fetch(url, params=params)
+        validate_page(html)
+        payload = dehydrated.find_search_payload(html, self.search_key_prefix)
+        if payload is None:
+            return {"error": "unavailable", "vertical": self.vertical}
+        summary = dehydrated.summarize_filters(payload, filter_name, value, max_items)
+        summary["vertical"] = self.vertical
+        summary["total_matches"] = payload.match_count
+        return summary
+
     def _result_from_doc(self, doc: dict[str, Any]) -> SearchResult | None:
         """Map one entry of finn.no's own search payload to a SearchResult.
 
