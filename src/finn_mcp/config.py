@@ -41,6 +41,22 @@ CACHE_RAW_HTML = os.environ.get("FINN_CACHE_RAW_HTML", "").lower() in {
     "1", "true", "yes", "on"
 }
 
+# Search pages ship their results as base64 JSON alongside the markup; see
+# scraper/dehydrated.py. Off by one env var, because a change at finn.no
+# should be recoverable without a new image.
+USE_DEHYDRATED_STATE = os.environ.get(
+    "FINN_USE_DEHYDRATED_STATE", "1"
+).lower() in {"1", "true", "yes", "on"}
+# Raise instead of quietly falling back to card scraping. For CI, where a
+# silent fallback would let a finn.no change land unnoticed.
+DEHYDRATED_STATE_STRICT = os.environ.get(
+    "FINN_DEHYDRATED_STATE_STRICT", ""
+).lower() in {"1", "true", "yes", "on"}
+# Decoding guards: the real blob is ~400 KB encoded, so these are ceilings,
+# not targets.
+MAX_STATE_B64_CHARS = _env_int("FINN_MAX_STATE_B64_CHARS", 12 * 1024 * 1024, 1024)
+MAX_STATE_BYTES = _env_int("FINN_MAX_STATE_BYTES", 8 * 1024 * 1024, 1024)
+
 
 def data_dir() -> Path:
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
