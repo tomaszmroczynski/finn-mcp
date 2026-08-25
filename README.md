@@ -21,6 +21,13 @@ reverse proxy, answering job-ad queries for a production application. Nearly
 everything below comes from that: things that only surface once software runs
 unattended for weeks rather than in a terminal for an afternoon.
 
+- **Search results are read from the data finn.no ships, not the markup.**
+  Search pages carry the results as JSON alongside the rendered page. Reading
+  that instead of walking the DOM returns 53 results where card scraping
+  returned 37 off the same page, with a location on every one instead of
+  none, plus the real total (13723 matching ads, not "53") and fields the
+  markup never showed -- make, model, mileage, employer, deadline. Card
+  scraping remains as a fallback and still handles real estate.
 - **Job ads read from the DOM when the JSON-LD disappears.** Since around
   April 2026 finn.no stopped shipping a schema.org `JobPosting` on job ads.
   Every job listing came back with `description=None` while the text sat in
@@ -42,9 +49,16 @@ unattended for weeks rather than in a terminal for an afternoon.
   string, because the caller is a language model rather than a form.
 - **Operational limits are environment variables**, so retuning them does not
   mean rebuilding the container image.
-- **Four operational tools** — `get_server_status`, `clear_cache`,
-  `export_saved_searches`, `import_saved_searches`.
-- **Seven tests and one fixture**, including the real job ad that broke the
+- **`discover_filters`**, so the filter parameters do not have to be guessed.
+  finn.no offers 16 filters on jobs and 24 on cars, keyed by codes like
+  `location=1.20001.20061`; this reports them with hit counts.
+- **Five operational tools** — `discover_filters`, `get_server_status`,
+  `clear_cache`, `export_saved_searches`, `import_saved_searches`.
+- **Silent degradation is visible.** `get_server_status` reports, per
+  vertical, whether searches were answered from the embedded data or from
+  card scraping, because the failure this project has already lived through
+  was not a crash -- it was months of answers that merely had nothing in them.
+- **41 tests and one fixture**, including the real job ad that broke the
   parser, so the regression is caught rather than remembered.
 
 ### Credit where it is due
@@ -63,11 +77,18 @@ Equally: the scraper architecture, the `FinnBackend` seam, the JSON-LD
 parsing, the SQLite cache, saved searches and the original six MCP tools are
 all upstream work. This fork did not design any of it.
 
+**Reading the embedded search data is not an original idea either.** It comes
+from [viktorfa/finn_mcp](https://github.com/viktorfa/finn_mcp), an unrelated
+MCP server for finn.no written in Node. No code was taken — that project is
+JavaScript and this is Python — but the approach is theirs, and it is a
+better approach than the DOM walking that was here.
+
 ## Tools
 
 | Tool | Purpose |
 |------|---------|
 | `search_finn` | Search a vertical by keyword + optional filters. |
+| `discover_filters` | List the filters finn.no offers for a vertical, with hit counts. |
 | `get_listing` | Fetch a full listing by `finnkode` or finn.no URL. |
 | `save_search` | Persist a named recurring search. |
 | `list_saved_searches` | List all saved searches. |
@@ -140,6 +161,17 @@ backoff. Relevant settings can be adjusted with:
 - `FINN_HTTP_TIMEOUT_SECONDS` (default `15`)
 - `FINN_MAX_SAVED_FINNKODES` (default `1000`)
 - `FINN_MAX_CACHE_BYTES` (default `262144000`, or 250 MiB)
+- `FINN_USE_DEHYDRATED_STATE` (default `1`) — read results from the embedded
+  search data; set to `0` to fall back to card scraping everywhere
+- `FINN_DEHYDRATED_STATE_STRICT` (default off) — raise instead of falling back
+  when the embedded data is missing. For CI, so a change at finn.no fails a
+  build rather than quietly returning sparser results.
+
+`search_finn` returns a `SearchResponse`: `results` for the page, plus
+`total_matches` and `last_page` for the whole result set, `search_url` for the
+request that was made, and `source` (`state` or `cards`) saying which path
+produced it. Real estate is always `cards`, and reports no totals rather than
+reporting the page length as one.
 
 `get_listing` accepts either a finnkode or a full `finn.no` listing URL.
 Providing a URL or explicit vertical avoids category-probing requests.
