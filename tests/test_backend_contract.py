@@ -11,6 +11,7 @@ import pytest
 from finn_mcp import http_client
 from finn_mcp.backend.api_backend import OfficialApiBackend
 from finn_mcp.backend.scraper_backend import ScraperBackend
+from finn_mcp.backend.scraper_backend import parse_listing_reference
 from finn_mcp.cache import Cache
 from .conftest import read_fixture
 
@@ -77,6 +78,19 @@ async def test_backend_get_listing_probes_vertical_when_unknown(backends):
         # 460211124 is a BAP item; vertical should be inferred.
         listing = await backend.get_listing("460211124", vertical=None)
         assert listing.vertical == "bap"
+
+
+async def test_backend_get_listing_infers_vertical_from_url(backends):
+    for backend in backends:
+        listing = await backend.get_listing(
+            "https://www.finn.no/recommerce/forsale/item/460211124"
+        )
+        assert listing.vertical == "bap"
+
+
+def test_parse_listing_reference_rejects_external_urls():
+    with pytest.raises(ValueError):
+        parse_listing_reference("https://example.com/item/123")
 
 
 async def test_official_backend_raises_until_implemented():

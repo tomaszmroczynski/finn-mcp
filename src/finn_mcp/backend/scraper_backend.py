@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import re
+from urllib.parse import parse_qs, urlparse
 
 from .. import http_client
 from ..cache import Cache
@@ -18,6 +20,32 @@ _VERTICAL_PROBE_ORDER: tuple[Vertical, ...] = (
     "lettings",
     "jobs",
 )
+
+_URL_VERTICALS: tuple[tuple[str, Vertical], ...] = (
+    ("/recommerce/forsale/item/", "bap"),
+    ("/mobility/item/", "cars_used"),
+    ("/realestate/homes/", "homes"),
+    ("/realestate/lettings/", "lettings"),
+    ("/job/ad/", "jobs"),
+)
+
+
+def parse_listing_reference(value: str) -> tuple[str, Vertical | None]:
+    """Return (finnkode, vertical hint) from a finnkode or a finn.no URL."""
+    if value.isdigit():
+        return value, None
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
+        "finn.no", "www.finn.no"
+    }:
+        raise ValueError("listing reference must be a finnkode or finn.no URL")
+    hint = next((v for marker, v in _URL_VERTICALS if marker in parsed.path), None)
+    query_code = (parse_qs(parsed.query).get("finnkode") or [None])[0]
+    path_match = re.search(r"/(?:item|ad)/(\d+)", parsed.path)
+    finnkode = query_code or (path_match.group(1) if path_match else None)
+    if not finnkode or not finnkode.isdigit():
+        raise ValueError("could not find finnkode in URL")
+    return finnkode, hint
 
 
 class ScraperBackend(FinnBackend):
@@ -43,8 +71,9 @@ class ScraperBackend(FinnBackend):
         finnkode: str,
         vertical: Vertical | None = None,
     ) -> Listing:
-        if not finnkode or not finnkode.isdigit():
-            raise ValueError(f"invalid finnkode: {finnkode!r}")
+        finnkode, url_vertical = parse_listing_reference(finnkode.strip())
+        if vertical is None:
+            vertical = url_vertical
 
         if vertical is None:
             vertical = await self.cache.vertical_hint(finnkode)
@@ -56,7 +85,8 @@ class ScraperBackend(FinnBackend):
         if vertical is not None:
             return await self._fetch_and_cache(finnkode, vertical)
 
-        # No hint, no cache — probe each vertical until one returns 200.
+        # No hint, no cache — probing is retained as a backwards-compatible
+        # fallback. Passing a result URL or vertical avoids these requests.
         last_exc: Exception | None = None
         for candidate in _VERTICAL_PROBE_ORDER:
             try:
