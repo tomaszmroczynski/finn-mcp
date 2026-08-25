@@ -296,5 +296,30 @@ class VerticalScraper(ABC):
         return {}
 
 
+def pick_doc_fields(doc: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
+    """Copy a fixed set of fields out of a search-payload entry.
+
+    A whitelist rather than a passthrough. Car entries carry regno and
+    chassis_number, which nothing here needs and which have no business
+    being pushed into a model's context on every search.
+    """
+    out = {k: doc[k] for k in fields if doc.get(k) is not None}
+    labels = doc.get("labels")
+    if isinstance(labels, list):
+        texts = [l.get("text") for l in labels if isinstance(l, dict) and l.get("text")]
+        if texts:
+            out["labels"] = texts
+    return out
+
+
+def epoch_ms_to_utc(value: Any) -> datetime | None:
+    if not isinstance(value, (int, float)) or value <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def now_utc() -> datetime:
     return datetime.now(tz=timezone.utc)

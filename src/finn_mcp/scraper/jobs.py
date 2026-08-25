@@ -7,7 +7,7 @@ from typing import Any
 from selectolax.parser import HTMLParser
 
 from ..models import Listing
-from .base import VerticalScraper, _clean, now_utc
+from .base import VerticalScraper, _clean, epoch_ms_to_utc, now_utc, pick_doc_fields
 from .jsonld import extract_jsonld, find_by_type
 
 
@@ -16,6 +16,21 @@ class JobsScraper(VerticalScraper):
     link_pattern = "/job/ad/"
     finnkode_re = re.compile(r"/job/ad/(\d+)")
     search_key_prefix = "SEARCH_ID_JOB_"
+
+    # Fields finn.no puts on a job search card. deadline is the one that
+    # matters most: the detail parser has to dig it out of a "Søknadsfrist"
+    # label, and here it arrives as a number.
+    _DOC_FIELDS = (
+        "company_name", "job_title", "no_of_positions", "locations", "coordinates",
+    )
+
+    def _doc_extras(self, doc: dict[str, Any]) -> dict[str, Any]:
+        extras = pick_doc_fields(doc, self._DOC_FIELDS)
+        for key in ("deadline", "published"):
+            moment = epoch_ms_to_utc(doc.get(key))
+            if moment is not None:
+                extras[key] = moment
+        return extras
 
     def search_url(
         self, query: str, page: int, filters: dict[str, str] | None

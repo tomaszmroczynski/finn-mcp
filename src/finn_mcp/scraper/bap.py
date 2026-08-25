@@ -6,7 +6,7 @@ from typing import Any
 from selectolax.parser import HTMLParser, Node
 
 from ..models import Listing
-from .base import VerticalScraper, _clean, now_utc, parse_price_nok
+from .base import VerticalScraper, _clean, now_utc, parse_price_nok, pick_doc_fields
 from .jsonld import extract_jsonld, find_by_type
 
 
@@ -15,6 +15,13 @@ class BapScraper(VerticalScraper):
     link_pattern = "/recommerce/forsale/item/"
     finnkode_re = re.compile(r"/recommerce/forsale/item/(\d+)")
     search_key_prefix = "SEARCH_ID_BAP_"
+
+    # distance is only present on a location-filtered search; harmless when
+    # absent, and the whole point of one when it is there.
+    _DOC_FIELDS = ("brand", "trade_type", "distance", "memory_size", "image_urls")
+
+    def _doc_extras(self, doc: dict[str, Any]) -> dict[str, Any]:
+        return pick_doc_fields(doc, self._DOC_FIELDS)
 
     def search_url(
         self, query: str, page: int, filters: dict[str, str] | None

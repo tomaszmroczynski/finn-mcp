@@ -6,7 +6,7 @@ from typing import Any
 from selectolax.parser import HTMLParser, Node
 
 from ..models import Listing
-from .base import VerticalScraper, _clean, now_utc, parse_price_nok
+from .base import VerticalScraper, _clean, now_utc, parse_price_nok, pick_doc_fields
 from .jsonld import extract_jsonld, find_by_type
 
 
@@ -131,6 +131,17 @@ class _CarsBase(VerticalScraper):
 class CarsUsedScraper(_CarsBase):
     vertical = "cars_used"
     search_key_prefix = "SEARCH_ID_CAR_USED"
+
+    # The full spec of every car on the page, without opening any of them.
+    # regno and chassis_number are deliberately not here.
+    _DOC_FIELDS = (
+        "make", "model", "model_specification", "year", "mileage", "mileage_unit",
+        "fuel", "transmission", "driving_range", "sales_form", "dealer_segment",
+        "organisation_name", "warranty_duration", "registration_class",
+    )
+
+    def _doc_extras(self, doc: dict[str, Any]) -> dict[str, Any]:
+        return pick_doc_fields(doc, self._DOC_FIELDS)
 
     def search_url(
         self, query: str, page: int, filters: dict[str, str] | None

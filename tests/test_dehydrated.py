@@ -134,3 +134,61 @@ def test_non_dict_docs_are_dropped_rather_than_failing_the_page():
     payload = dehydrated.find_search_payload(html, "SEARCH_ID_")
     assert payload is not None
     assert payload.docs == [{"id": "1", "heading": "real"}]
+
+
+# ---------- per-vertical fields lifted off the search payload ----------
+
+def _first_result(vertical: str, fixture: str):
+    from finn_mcp.scraper import get_scraper
+
+    scraper = get_scraper(vertical)
+    payload = dehydrated.find_search_payload(
+        read_fixture(fixture), scraper.search_key_prefix
+    )
+    assert payload is not None
+    return scraper, payload, scraper._result_from_doc(payload.docs[0])
+
+
+def test_job_cards_carry_employer_and_deadline():
+    """The detail parser digs the deadline out of a "Søknadsfrist" label.
+
+    On a search card it arrives as a number, for every ad on the page at once.
+    """
+    from datetime import datetime, timezone
+
+    _, _, result = _first_result("jobs", "jobs_search.html")
+    assert result.extra["company_name"]
+    assert result.extra["job_title"]
+    assert isinstance(result.extra["deadline"], datetime)
+    assert result.extra["deadline"].tzinfo == timezone.utc
+    assert isinstance(result.extra["published"], datetime)
+
+
+def test_car_cards_carry_the_spec_without_opening_the_ad():
+    _, _, result = _first_result("cars_used", "cars_used_search.html")
+    for field in ("make", "model", "year", "mileage", "fuel", "transmission"):
+        assert field in result.extra, field
+    assert isinstance(result.extra["year"], int)
+
+
+def test_car_cards_do_not_carry_the_registration_or_chassis_number():
+    """Both are in the payload. Neither belongs in a model's context."""
+    scraper, payload, result = _first_result("cars_used", "cars_used_search.html")
+    assert "regno" in payload.docs[0], "fixture no longer proves anything"
+    assert "regno" not in result.extra
+    assert "chassis_number" not in result.extra
+
+
+def test_bap_cards_carry_labels_as_plain_text():
+    scraper, payload, result = _first_result("bap", "bap_search.html")
+    assert payload.docs[0]["labels"] == [
+        {"id": "private", "text": "Privat", "type": "SECONDARY"}
+    ]
+    assert result.extra["labels"] == ["Privat"]
+
+
+def test_malformed_timestamps_are_dropped_not_raised():
+    from finn_mcp.scraper.base import epoch_ms_to_utc
+
+    for junk in (None, "", "soon", -1, 0, 10**20):
+        assert epoch_ms_to_utc(junk) is None
