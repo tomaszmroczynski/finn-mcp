@@ -14,6 +14,7 @@ class BapScraper(VerticalScraper):
     vertical = "bap"
     link_pattern = "/recommerce/forsale/item/"
     finnkode_re = re.compile(r"/recommerce/forsale/item/(\d+)")
+    search_key_prefix = "SEARCH_ID_BAP_"
 
     def search_url(
         self, query: str, page: int, filters: dict[str, str] | None

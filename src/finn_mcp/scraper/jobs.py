@@ -15,6 +15,7 @@ class JobsScraper(VerticalScraper):
     vertical = "jobs"
     link_pattern = "/job/ad/"
     finnkode_re = re.compile(r"/job/ad/(\d+)")
+    search_key_prefix = "SEARCH_ID_JOB_"
 
     def search_url(
         self, query: str, page: int, filters: dict[str, str] | None

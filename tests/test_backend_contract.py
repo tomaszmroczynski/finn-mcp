@@ -99,3 +99,52 @@ async def test_official_backend_raises_until_implemented():
         await backend.search("bap", query="anything")
     with pytest.raises(NotImplementedError):
         await backend.get_listing("123", vertical="bap")
+
+
+# ---------- embedded search state, and the fallback under it ----------
+
+async def test_search_uses_embedded_state_when_finn_ships_it(backends):
+    """Location is the tell.
+
+    Torget cards have no stable DOM hook for it, so the card parser has
+    always returned None there. A location coming back means the result was
+    built from finn.no's own search payload rather than scraped off the page.
+    """
+    for backend in backends:
+        results = await backend.search("bap", query="iphone")
+        assert results[0].location
+        assert results[0].url.startswith("https://www.finn.no/")
+
+
+async def test_search_falls_back_to_cards_when_state_is_absent(backends):
+    """Real estate search pages carry no embedded state at all."""
+    for backend in backends:
+        results = await backend.search("homes", query="oslo")
+        assert results, "homes must keep working via card scraping"
+        assert results[0].vertical == "homes"
+
+
+async def test_search_still_works_with_the_state_layer_switched_off(
+    backends, monkeypatch
+):
+    """FINN_USE_DEHYDRATED_STATE=0 has to be a usable escape hatch."""
+    monkeypatch.setattr("finn_mcp.config.USE_DEHYDRATED_STATE", False)
+    for backend in backends:
+        results = await backend.search("bap", query="iphone")
+        assert results
+        assert results[0].finnkode.isdigit()
+
+
+async def test_strict_mode_raises_instead_of_degrading_quietly(backends, monkeypatch):
+    """CI should fail loudly if finn.no stops shipping the payload.
+
+    Without this the layer would silently drop back to card scraping and the
+    change would only surface as gradually worse results.
+    """
+    from finn_mcp.scraper.base import MissingSearchStateError
+
+    monkeypatch.setattr("finn_mcp.config.DEHYDRATED_STATE_STRICT", True)
+    monkeypatch.setattr("finn_mcp.scraper.bap.BapScraper.search_key_prefix", "SEARCH_ID_NOPE_")
+    for backend in backends:
+        with pytest.raises(MissingSearchStateError):
+            await backend.search("bap", query="iphone")

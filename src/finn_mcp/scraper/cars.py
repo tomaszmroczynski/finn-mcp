@@ -130,6 +130,7 @@ class _CarsBase(VerticalScraper):
 
 class CarsUsedScraper(_CarsBase):
     vertical = "cars_used"
+    search_key_prefix = "SEARCH_ID_CAR_USED"
 
     def search_url(
         self, query: str, page: int, filters: dict[str, str] | None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -7,8 +8,11 @@ from typing import Any
 
 from selectolax.parser import HTMLParser, Node
 
-from .. import http_client
+from .. import config, http_client
 from ..models import Listing, SearchResult, Vertical
+from . import dehydrated
+
+log = logging.getLogger(__name__)
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _BLOCK_MARKERS = (
@@ -22,6 +26,14 @@ _BLOCK_MARKERS = (
 
 class PageBlockedError(RuntimeError):
     pass
+
+
+class MissingSearchStateError(RuntimeError):
+    """Raised only under DEHYDRATED_STATE_STRICT, so CI notices a change."""
+
+    def __init__(self, vertical: str):
+        super().__init__(f"no embedded search state on the {vertical} search page")
+        self.vertical = vertical
 
 
 def validate_page(html: str) -> None:
@@ -92,6 +104,10 @@ class VerticalScraper(ABC):
     vertical: Vertical
     link_pattern: str  # substring that distinguishes this vertical's detail links
     finnkode_re: re.Pattern[str]
+    # Prefix of finn.no's own search_key for this vertical. None means the
+    # vertical has no embedded search state (real estate) and card scraping
+    # is the only path.
+    search_key_prefix: str | None = None
 
     @abstractmethod
     def search_url(self, query: str, page: int, filters: dict[str, str] | None) -> tuple[str, dict[str, str]]:
@@ -111,7 +127,65 @@ class VerticalScraper(ABC):
         url, params = self.search_url(query, page, filters)
         html = await http_client.fetch(url, params=params)
         validate_page(html)
+
+        if config.USE_DEHYDRATED_STATE:
+            payload = dehydrated.find_search_payload(html, self.search_key_prefix)
+            if payload is not None:
+                results = [
+                    r for r in (self._result_from_doc(d) for d in payload.docs)
+                    if r is not None
+                ]
+                if results:
+                    return results
+                log.warning(
+                    "%s: embedded state present but produced no results; "
+                    "falling back to card scraping",
+                    self.vertical,
+                )
+            elif self.search_key_prefix is not None:
+                log.warning(
+                    "%s: expected embedded search state and found none; "
+                    "falling back to card scraping",
+                    self.vertical,
+                )
+                if config.DEHYDRATED_STATE_STRICT:
+                    raise MissingSearchStateError(self.vertical)
+
         return self.parse_search_cards(html)
+
+    def _result_from_doc(self, doc: dict[str, Any]) -> SearchResult | None:
+        """Map one entry of finn.no's own search payload to a SearchResult.
+
+        The shared fields are named identically across verticals, so only the
+        per-vertical extras are left to subclasses.
+        """
+        finnkode = str(doc.get("id") or doc.get("ad_id") or "")
+        title = _clean(doc.get("heading"))
+        if not finnkode.isdigit() or not title:
+            return None
+        price = doc.get("price")
+        price = price if isinstance(price, dict) else {}
+        image = doc.get("image")
+        image = image if isinstance(image, dict) else {}
+        image_urls = doc.get("image_urls")
+        amount = price.get("amount")
+        url = doc.get("canonical_url") or self.detail_url(finnkode)
+        return SearchResult(
+            finnkode=finnkode,
+            vertical=self.vertical,
+            title=title,
+            price=amount if isinstance(amount, int) else None,
+            currency=price.get("currency_code") or "NOK",
+            location=_clean(doc.get("location")),
+            thumbnail_url=image.get("url")
+            or (image_urls[0] if isinstance(image_urls, list) and image_urls else None),
+            url=url,
+            extra=self._doc_extras(doc),
+        )
+
+    def _doc_extras(self, doc: dict[str, Any]) -> dict[str, Any]:
+        """Per-vertical fields worth surfacing from a search payload entry."""
+        return {}
 
     async def fetch_detail(self, finnkode: str) -> tuple[str, Listing]:
         url = self.detail_url(finnkode)
