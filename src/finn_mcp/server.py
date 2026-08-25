@@ -60,7 +60,7 @@ async def get_listing(
     finnkode: str,
     vertical: Vertical | None = None,
 ) -> Listing | dict[str, Any]:
-    """Fetch a full listing by its ``finnkode``.
+    """Fetch a full listing by its ``finnkode`` or full finn.no URL.
 
     If ``vertical`` is omitted the server tries a cache hint first, then
     probes each vertical until one returns a valid page. Results are cached
@@ -146,6 +146,48 @@ async def check_saved_search(name: str) -> list[SearchResult] | dict[str, Any]:
     union = sorted({r.finnkode for r in results} | previous)
     await _cache.update_search_state(name, now_utc(), union)
     return new
+
+
+@mcp.tool()
+async def clear_cache() -> dict[str, Any]:
+    """Delete cached listing data. Saved searches are preserved."""
+    return await _cache.clear()
+
+
+@mcp.tool()
+async def get_server_status() -> dict[str, Any]:
+    """Return local backend, cache, rate-limit, and privacy settings."""
+    return {
+        "server": "finn-mcp",
+        "unofficial": True,
+        "backend": config.backend_name(),
+        "requests_per_minute": config.REQUESTS_PER_MINUTE,
+        "cache_ttl_seconds": config.LISTING_TTL_SECONDS,
+        "cache": await _cache.status(),
+    }
+
+
+@mcp.tool()
+async def export_saved_searches() -> list[dict[str, Any]]:
+    """Export saved searches as portable JSON-compatible objects."""
+    return [s.model_dump(mode="json") for s in await _cache.list_searches()]
+
+
+@mcp.tool()
+async def import_saved_searches(
+    searches: list[dict[str, Any]],
+    overwrite: bool = False,
+) -> dict[str, int]:
+    """Import searches previously returned by export_saved_searches."""
+    imported = skipped = 0
+    for payload in searches:
+        saved = SavedSearch.model_validate(payload)
+        if not overwrite and await _cache.get_search(saved.name) is not None:
+            skipped += 1
+            continue
+        await _cache.save_search(saved)
+        imported += 1
+    return {"imported": imported, "skipped": skipped}
 
 
 def main() -> None:
