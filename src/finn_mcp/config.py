@@ -9,10 +9,37 @@ USER_AGENT = (
 
 LISTING_TTL_SECONDS = 24 * 60 * 60
 
-REQUEST_DELAY_MIN = 0.3
-REQUEST_DELAY_MAX = 1.2
+def _env_int(name: str, default: int, minimum: int = 0) -> int:
+    try:
+        return max(minimum, int(os.environ.get(name, default)))
+    except ValueError:
+        return default
 
-HTTP_TIMEOUT_SECONDS = 15.0
+
+def _env_float(name: str, default: float, minimum: float = 0.0) -> float:
+    try:
+        return max(minimum, float(os.environ.get(name, default)))
+    except ValueError:
+        return default
+
+
+REQUEST_DELAY_MIN = _env_float("FINN_REQUEST_DELAY_MIN", 0.3)
+REQUEST_DELAY_MAX = max(
+    REQUEST_DELAY_MIN, _env_float("FINN_REQUEST_DELAY_MAX", 1.2)
+)
+REQUESTS_PER_MINUTE = _env_int("FINN_REQUESTS_PER_MINUTE", 20, 1)
+HTTP_MAX_RETRIES = _env_int("FINN_HTTP_MAX_RETRIES", 3, 1)
+HTTP_TIMEOUT_SECONDS = _env_float("FINN_HTTP_TIMEOUT_SECONDS", 15.0, 1.0)
+MAX_QUERY_LENGTH = _env_int("FINN_MAX_QUERY_LENGTH", 200, 1)
+MAX_FILTERS = _env_int("FINN_MAX_FILTERS", 20, 0)
+MAX_SAVED_FINNKODES = _env_int("FINN_MAX_SAVED_FINNKODES", 1000, 1)
+MAX_CACHE_BYTES = _env_int("FINN_MAX_CACHE_BYTES", 250 * 1024 * 1024, 0)
+CACHE_CLEANUP_INTERVAL_SECONDS = _env_int(
+    "FINN_CACHE_CLEANUP_INTERVAL_SECONDS", 24 * 60 * 60, 60
+)
+CACHE_RAW_HTML = os.environ.get("FINN_CACHE_RAW_HTML", "").lower() in {
+    "1", "true", "yes", "on"
+}
 
 
 def data_dir() -> Path:
