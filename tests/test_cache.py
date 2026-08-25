@@ -85,3 +85,31 @@ async def test_delete_saved_search(cache):
     await cache.save_search(SavedSearch(name="x", vertical="bap", query="q"))
     assert await cache.delete_search("x") is True
     assert await cache.delete_search("x") is False
+
+
+async def test_raw_html_is_not_cached_by_default(cache):
+    listing = _make_listing("100000004")
+    await cache.put_listing(listing, raw_html="<html>private detail</html>")
+    row = cache._get_listing("100000004", 3600)
+    assert row is not None
+    assert row["raw_html"] == ""
+
+
+async def test_clear_cache_preserves_saved_searches(cache):
+    await cache.put_listing(_make_listing("100000005"), raw_html="")
+    await cache.save_search(SavedSearch(name="keep", vertical="bap", query="q"))
+    result = await cache.clear()
+    assert result["removed_listings"] == 1
+    assert await cache.get_listing("100000005") is None
+    assert await cache.get_search("keep") is not None
+
+
+async def test_saved_search_history_is_bounded(cache, monkeypatch):
+    monkeypatch.setattr("finn_mcp.config.MAX_SAVED_FINNKODES", 3)
+    await cache.save_search(SavedSearch(name="bounded", vertical="bap", query="q"))
+    await cache.update_search_state(
+        "bounded", datetime.now(tz=timezone.utc), ["1", "2", "3", "4"]
+    )
+    saved = await cache.get_search("bounded")
+    assert saved is not None
+    assert saved.last_finnkodes == ["2", "3", "4"]

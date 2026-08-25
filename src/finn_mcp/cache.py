@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS listings (
   finnkode     TEXT PRIMARY KEY,
   vertical     TEXT NOT NULL,
   fetched_at   INTEGER NOT NULL,
-  raw_html     TEXT NOT NULL,
+  raw_html     TEXT,
   parsed_json  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_listings_vertical ON listings(vertical);
@@ -39,6 +39,9 @@ def _connect(db_path: Path | str) -> sqlite3.Connection:
         db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
+    if str(db_path) != ":memory:":
+        conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
     conn.commit()
     return conn
@@ -47,6 +50,8 @@ def _connect(db_path: Path | str) -> sqlite3.Connection:
 class Cache:
     def __init__(self, db_path: Path | str | None = None):
         self.db_path: Path | str = db_path if db_path is not None else config.cache_db_path()
+        self._cleanup_sync()
+        self._last_cleanup = time.monotonic()
 
     def _conn(self) -> sqlite3.Connection:
         return _connect(self.db_path)
@@ -78,7 +83,7 @@ class Cache:
             ).fetchone()
         return row["vertical"] if row else None
 
-    def _put_listing(self, listing: Listing, raw_html: str) -> None:
+    def _put_listing(self, listing: Listing, raw_html: str | None) -> None:
         payload = listing.model_dump(mode="json")
         with self._conn() as c:
             c.execute(
@@ -89,11 +94,16 @@ class Cache:
                     listing.finnkode,
                     listing.vertical,
                     int(listing.fetched_at.timestamp()),
-                    raw_html,
+                    raw_html if config.CACHE_RAW_HTML else "",
                     json.dumps(payload),
                 ),
             )
             c.commit()
+        if (
+            time.monotonic() - self._last_cleanup
+            >= config.CACHE_CLEANUP_INTERVAL_SECONDS
+        ):
+            self._cleanup_sync()
 
     async def get_listing(
         self, finnkode: str, max_age_seconds: int = config.LISTING_TTL_SECONDS
@@ -106,8 +116,64 @@ class Cache:
     async def vertical_hint(self, finnkode: str) -> Vertical | None:
         return await asyncio.to_thread(self._get_vertical_hint, finnkode)
 
-    async def put_listing(self, listing: Listing, raw_html: str) -> None:
+    async def put_listing(self, listing: Listing, raw_html: str | None = None) -> None:
         await asyncio.to_thread(self._put_listing, listing, raw_html)
+
+    def _cleanup_sync(self, *, vacuum: bool = False) -> dict[str, int]:
+        cutoff = int(time.time()) - config.LISTING_TTL_SECONDS
+        with self._conn() as c:
+            removed = c.execute(
+                "DELETE FROM listings WHERE fetched_at <= ?", (cutoff,)
+            ).rowcount
+            if config.MAX_CACHE_BYTES and self._db_size() > config.MAX_CACHE_BYTES:
+                count = c.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
+                to_remove = max(1, count // 4)
+                removed += c.execute(
+                    "DELETE FROM listings WHERE finnkode IN ("
+                    "SELECT finnkode FROM listings ORDER BY fetched_at ASC LIMIT ?"
+                    ")",
+                    (to_remove,),
+                ).rowcount
+                vacuum = True
+            c.commit()
+            if vacuum:
+                c.execute("VACUUM")
+        self._last_cleanup = time.monotonic()
+        return {"removed_listings": removed}
+
+    def _db_size(self) -> int:
+        if self.db_path == ":memory:":
+            return 0
+        path = Path(self.db_path)
+        return path.stat().st_size if path.exists() else 0
+
+    async def cleanup(self, *, vacuum: bool = False) -> dict[str, int]:
+        return await asyncio.to_thread(self._cleanup_sync, vacuum=vacuum)
+
+    def _clear_sync(self) -> dict[str, int]:
+        with self._conn() as c:
+            removed = c.execute("DELETE FROM listings").rowcount
+            c.commit()
+            c.execute("VACUUM")
+        return {"removed_listings": removed}
+
+    async def clear(self) -> dict[str, int]:
+        return await asyncio.to_thread(self._clear_sync)
+
+    def _status_sync(self) -> dict[str, Any]:
+        with self._conn() as c:
+            listings = c.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
+            searches = c.execute("SELECT COUNT(*) FROM saved_searches").fetchone()[0]
+        return {
+            "listings": listings,
+            "saved_searches": searches,
+            "size_bytes": self._db_size(),
+            "max_size_bytes": config.MAX_CACHE_BYTES,
+            "raw_html_enabled": config.CACHE_RAW_HTML,
+        }
+
+    async def status(self) -> dict[str, Any]:
+        return await asyncio.to_thread(self._status_sync)
 
     # ---------- saved searches ----------
 
@@ -160,7 +226,11 @@ class Cache:
             c.execute(
                 "UPDATE saved_searches SET last_checked_at = ?, last_finnkodes_json = ? "
                 "WHERE name = ?",
-                (int(checked_at.timestamp()), json.dumps(finnkodes), name),
+                (
+                    int(checked_at.timestamp()),
+                    json.dumps(finnkodes[-config.MAX_SAVED_FINNKODES :]),
+                    name,
+                ),
             )
             c.commit()
 
