@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import urlencode
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 from selectolax.parser import HTMLParser, Node
 
 from .. import config, http_client
-from ..models import Listing, SearchResult, Vertical
+from ..models import Listing, SearchResponse, SearchResult, Vertical
 from . import dehydrated
 
 log = logging.getLogger(__name__)
@@ -123,10 +124,11 @@ class VerticalScraper(ABC):
 
     async def search(
         self, query: str, page: int = 1, filters: dict[str, str] | None = None
-    ) -> list[SearchResult]:
+    ) -> SearchResponse:
         url, params = self.search_url(query, page, filters)
         html = await http_client.fetch(url, params=params)
         validate_page(html)
+        full_url = f"{url}?{urlencode(params)}" if params else url
 
         if config.USE_DEHYDRATED_STATE:
             payload = dehydrated.find_search_payload(html, self.search_key_prefix)
@@ -136,7 +138,14 @@ class VerticalScraper(ABC):
                     if r is not None
                 ]
                 if results:
-                    return results
+                    return SearchResponse(
+                        results=results,
+                        total_matches=payload.match_count,
+                        page=page,
+                        last_page=payload.last_page,
+                        search_url=full_url,
+                        source="state",
+                    )
                 log.warning(
                     "%s: embedded state present but produced no results; "
                     "falling back to card scraping",
@@ -151,7 +160,14 @@ class VerticalScraper(ABC):
                 if config.DEHYDRATED_STATE_STRICT:
                     raise MissingSearchStateError(self.vertical)
 
-        return self.parse_search_cards(html)
+        # Card scraping cannot see past the page it was given, so the totals
+        # stay unset rather than being filled in with a guess.
+        return SearchResponse(
+            results=self.parse_search_cards(html),
+            page=page,
+            search_url=full_url,
+            source="cards",
+        )
 
     def _result_from_doc(self, doc: dict[str, Any]) -> SearchResult | None:
         """Map one entry of finn.no's own search payload to a SearchResult.

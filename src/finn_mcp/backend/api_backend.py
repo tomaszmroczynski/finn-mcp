@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..models import Listing, SearchResult, Vertical
+from ..models import Listing, SearchResponse, Vertical
 from .base import FinnBackend
 
 
@@ -31,7 +31,7 @@ class OfficialApiBackend(FinnBackend):
         query: str,
         page: int = 1,
         filters: dict[str, str] | None = None,
-    ) -> list[SearchResult]:
+    ) -> SearchResponse:
         raise NotImplementedError(
             "OfficialApiBackend is a stub — partner credentials and endpoint "
             "wiring are required. Set FINN_BACKEND=scraper to use the scraper."

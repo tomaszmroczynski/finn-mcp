@@ -9,7 +9,7 @@ from mcp.server.fastmcp import FastMCP
 from . import config, http_client
 from .backend.base import ListingNotFound
 from .cache import Cache
-from .models import Listing, SavedSearch, SearchResult, Vertical
+from .models import Listing, SavedSearch, SearchResponse, SearchResult, Vertical
 from .scraper.base import now_utc
 
 log = logging.getLogger("finn_mcp")
@@ -30,7 +30,7 @@ async def search_finn(
     query: str,
     page: int = 1,
     filters: dict[str, str] | None = None,
-) -> list[SearchResult] | dict[str, Any]:
+) -> SearchResponse | dict[str, Any]:
     """Search finn.no within a vertical.
 
     ``vertical`` is one of: ``bap`` (Torget / used goods), ``homes`` (real
@@ -41,8 +41,14 @@ async def search_finn(
     URL-query parameters understood by finn.no (e.g. ``{"price_to":"300000"}``
     for cars, ``{"location":"1.20001.20061"}`` for Oslo).
 
-    Returns up to ~50 ``SearchResult`` entries. Fewer if finn.no returned
-    fewer matches; an empty list is a valid result.
+    Returns a ``SearchResponse``: ``results`` holds up to ~50 entries for the
+    requested page, while ``total_matches`` is how many ads match the query
+    overall and ``last_page`` how far paging goes. An empty ``results`` list
+    is a valid answer.
+
+    ``source`` reports where the fields came from: ``state`` means finn.no's
+    own search payload, ``cards`` means they were parsed off the rendered
+    page and will be sparser -- real estate is always ``cards``.
     """
     try:
         return await _backend().search(vertical, query, page=page, filters=filters)
@@ -130,7 +136,7 @@ async def check_saved_search(name: str) -> list[SearchResult] | dict[str, Any]:
         return {"error": "not_found", "name": name}
 
     try:
-        results = await _backend().search(
+        response = await _backend().search(
             saved.vertical, saved.query, page=1, filters=saved.filters
         )
     except NotImplementedError as exc:
@@ -141,6 +147,7 @@ async def check_saved_search(name: str) -> list[SearchResult] | dict[str, Any]:
         log.exception("check_saved_search failed for %s", name)
         return {"error": "parse_failed", "message": str(exc)}
 
+    results = response.results
     previous = set(saved.last_finnkodes)
     new = [r for r in results if r.finnkode not in previous]
     union = sorted({r.finnkode for r in results} | previous)

@@ -6,7 +6,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .. import config, http_client
 from ..cache import Cache
-from ..models import ALL_VERTICALS, Listing, SearchResult, Vertical
+from ..models import ALL_VERTICALS, Listing, SearchResponse, Vertical
 from ..scraper import get_scraper
 from .base import FinnBackend, ListingNotFound
 
@@ -60,7 +60,7 @@ class ScraperBackend(FinnBackend):
         query: str,
         page: int = 1,
         filters: dict[str, str] | None = None,
-    ) -> list[SearchResult]:
+    ) -> SearchResponse:
         if vertical not in ALL_VERTICALS:
             raise ValueError(f"unknown vertical: {vertical}")
         if len(query) > config.MAX_QUERY_LENGTH:

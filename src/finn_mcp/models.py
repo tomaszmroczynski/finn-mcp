@@ -36,6 +36,22 @@ class SearchResult(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
+class SearchResponse(BaseModel):
+    """One page of results, plus what finn.no said about the whole result set.
+
+    ``total_matches`` is the number of ads matching the query, which is not
+    the length of ``results`` -- a page holds about 50. Reporting the page
+    length as the total told the caller it had seen everything.
+    """
+
+    results: list[SearchResult]
+    total_matches: int | None = None
+    page: int = 1
+    last_page: int | None = None
+    search_url: str
+    source: Literal["state", "cards"] = "cards"
+
+
 class Listing(BaseModel):
     finnkode: str
     vertical: Vertical

@@ -50,10 +50,12 @@ def backends(tmp_path, stub_http):
 
 async def test_backend_search_bap(backends):
     for backend in backends:
-        results = await backend.search("bap", query="iphone")
-        assert results, f"{backend.name}: empty search"
-        assert results[0].vertical == "bap"
-        assert results[0].finnkode.isdigit()
+        response = await backend.search("bap", query="iphone")
+        assert response.results, f"{backend.name}: empty search"
+        assert response.results[0].vertical == "bap"
+        assert response.results[0].finnkode.isdigit()
+        assert response.search_url.startswith("https://www.finn.no/")
+        assert response.page == 1
 
 
 async def test_backend_get_listing_bap(backends):
@@ -111,17 +113,26 @@ async def test_search_uses_embedded_state_when_finn_ships_it(backends):
     built from finn.no's own search payload rather than scraped off the page.
     """
     for backend in backends:
-        results = await backend.search("bap", query="iphone")
-        assert results[0].location
-        assert results[0].url.startswith("https://www.finn.no/")
+        response = await backend.search("bap", query="iphone")
+        assert response.source == "state"
+        assert response.results[0].location
+        assert response.results[0].url.startswith("https://www.finn.no/")
+        # The whole result set, not this page: 53 ads shown of 13723 matching.
+        assert response.total_matches == 13723
+        assert response.total_matches > len(response.results)
+        assert response.last_page == 50
 
 
 async def test_search_falls_back_to_cards_when_state_is_absent(backends):
     """Real estate search pages carry no embedded state at all."""
     for backend in backends:
-        results = await backend.search("homes", query="oslo")
-        assert results, "homes must keep working via card scraping"
-        assert results[0].vertical == "homes"
+        response = await backend.search("homes", query="oslo")
+        assert response.source == "cards"
+        assert response.results, "homes must keep working via card scraping"
+        assert response.results[0].vertical == "homes"
+        # Card scraping cannot see the full result set, so it must not claim to.
+        assert response.total_matches is None
+        assert response.last_page is None
 
 
 async def test_search_still_works_with_the_state_layer_switched_off(
@@ -130,9 +141,10 @@ async def test_search_still_works_with_the_state_layer_switched_off(
     """FINN_USE_DEHYDRATED_STATE=0 has to be a usable escape hatch."""
     monkeypatch.setattr("finn_mcp.config.USE_DEHYDRATED_STATE", False)
     for backend in backends:
-        results = await backend.search("bap", query="iphone")
-        assert results
-        assert results[0].finnkode.isdigit()
+        response = await backend.search("bap", query="iphone")
+        assert response.source == "cards"
+        assert response.results
+        assert response.results[0].finnkode.isdigit()
 
 
 async def test_strict_mode_raises_instead_of_degrading_quietly(backends, monkeypatch):
