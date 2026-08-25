@@ -4,7 +4,7 @@ import logging
 import re
 from urllib.parse import parse_qs, urlparse
 
-from .. import http_client
+from .. import config, http_client
 from ..cache import Cache
 from ..models import ALL_VERTICALS, Listing, SearchResult, Vertical
 from ..scraper import get_scraper
@@ -63,6 +63,18 @@ class ScraperBackend(FinnBackend):
     ) -> list[SearchResult]:
         if vertical not in ALL_VERTICALS:
             raise ValueError(f"unknown vertical: {vertical}")
+        if len(query) > config.MAX_QUERY_LENGTH:
+            raise ValueError(f"query exceeds {config.MAX_QUERY_LENGTH} characters")
+        if page < 1 or page > 100:
+            raise ValueError("page must be between 1 and 100")
+        if filters and len(filters) > config.MAX_FILTERS:
+            raise ValueError(f"at most {config.MAX_FILTERS} filters are allowed")
+        if filters and any(
+            not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", key)
+            or len(str(value)) > 500
+            for key, value in filters.items()
+        ):
+            raise ValueError("invalid filter key or value")
         scraper = get_scraper(vertical)
         return await scraper.search(query=query, page=page, filters=filters)
 
