@@ -101,6 +101,21 @@ def first_image_src(article: Node) -> str | None:
     return None
 
 
+# How each search was answered, per vertical. Surfaced by get_server_status:
+# a rising "cards" count on a vertical that should ship state is how a change
+# at finn.no becomes visible before it shows up as worse answers.
+_extraction_counts: dict[str, dict[str, int]] = {}
+
+
+def _record_extraction(vertical: str, source: str) -> None:
+    counts = _extraction_counts.setdefault(vertical, {"state": 0, "cards": 0})
+    counts[source] = counts.get(source, 0) + 1
+
+
+def extraction_counts() -> dict[str, dict[str, int]]:
+    return {v: dict(c) for v, c in sorted(_extraction_counts.items())}
+
+
 class VerticalScraper(ABC):
     vertical: Vertical
     link_pattern: str  # substring that distinguishes this vertical's detail links
@@ -138,6 +153,7 @@ class VerticalScraper(ABC):
                     if r is not None
                 ]
                 if results:
+                    _record_extraction(self.vertical, "state")
                     return SearchResponse(
                         results=results,
                         total_matches=payload.match_count,
@@ -162,6 +178,7 @@ class VerticalScraper(ABC):
 
         # Card scraping cannot see past the page it was given, so the totals
         # stay unset rather than being filled in with a guess.
+        _record_extraction(self.vertical, "cards")
         return SearchResponse(
             results=self.parse_search_cards(html),
             page=page,

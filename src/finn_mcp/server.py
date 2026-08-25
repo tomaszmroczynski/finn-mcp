@@ -10,7 +10,7 @@ from . import config, http_client
 from .backend.base import ListingNotFound
 from .cache import Cache
 from .models import Listing, SavedSearch, SearchResponse, SearchResult, Vertical
-from .scraper.base import now_utc
+from .scraper.base import extraction_counts, now_utc
 
 log = logging.getLogger("finn_mcp")
 
@@ -171,6 +171,11 @@ async def get_server_status() -> dict[str, Any]:
         "requests_per_minute": config.REQUESTS_PER_MINUTE,
         "cache_ttl_seconds": config.LISTING_TTL_SECONDS,
         "cache": await _cache.status(),
+        "embedded_state_enabled": config.USE_DEHYDRATED_STATE,
+        # Per vertical, how searches were answered this session. A vertical
+        # that ships embedded state should stay at cards: 0; anything else
+        # means finn.no changed and results quietly got sparser.
+        "extraction": extraction_counts(),
     }
 
 

@@ -160,3 +160,28 @@ async def test_strict_mode_raises_instead_of_degrading_quietly(backends, monkeyp
     for backend in backends:
         with pytest.raises(MissingSearchStateError):
             await backend.search("bap", query="iphone")
+
+
+async def test_extraction_counts_show_which_path_answered(backends):
+    """A quiet fallback to card scraping has to be visible somewhere.
+
+    Counted as deltas rather than absolutes because the counters are
+    process-wide and other tests search too.
+    """
+    from finn_mcp.scraper.base import extraction_counts
+
+    def count(vertical: str, source: str) -> int:
+        return extraction_counts().get(vertical, {}).get(source, 0)
+
+    before_state = count("bap", "state")
+    before_homes = count("homes", "cards")
+    before_bap_cards = count("bap", "cards")
+
+    for backend in backends:
+        await backend.search("bap", query="iphone")
+        await backend.search("homes", query="oslo")
+
+    assert count("bap", "state") == before_state + len(backends)
+    assert count("homes", "cards") == before_homes + len(backends)
+    # Nothing here should have pushed bap onto the card path.
+    assert count("bap", "cards") == before_bap_cards
