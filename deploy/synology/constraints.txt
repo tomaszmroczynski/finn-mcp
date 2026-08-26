@@ -1,0 +1,22 @@
+# Ograniczenia wersji dla obrazu finn-mcp (Synology).
+#
+# Powod istnienia tego pliku: upstream (github.com/aHk-coder/finn-mcp) deklaruje
+# "mcp[cli]>=1.27.0" BEZ gornego ograniczenia. Wydanie 2.x oficjalnego SDK
+# wyprowadzilo FastMCP do osobnego pakietu, wiec `mcp.server.fastmcp` przestal
+# istniec i kontener wpadal w petle restartow z ModuleNotFoundError.
+#
+# Poprawianie tego przez edycje cudzego pyproject.toml na NAS-ie dziala do
+# pierwszego `git pull` — potem awaria wraca i trzeba ja diagnozowac od zera.
+# Plik ograniczen dziala na zewnatrz projektu: pip respektuje go niezaleznie od
+# tego, co upstream napisze u siebie, i przezywa aktualizacje.
+#
+# Zdejmij ten sufit dopiero wtedy, gdy upstream zacznie importowac FastMCP
+# z nowego miejsca (pakiet `fastmcp`).
+mcp>=1.27.0,<2
+
+# UWAGA na ksztalt wpisu: BEZ extras.
+# `mcp[cli]>=1.27.0,<2` wyglada naturalnie, bo tak brzmi zaleznosc w pyproject.toml
+# upstreamu — ale pip odmawia: "ERROR: Constraints cannot have extras". Plik ograniczen
+# opisuje WERSJE pakietu, nie to, ktore jego dodatki maja sie zainstalowac. O extras
+# nadal decyduje upstream (`mcp[cli]` w jego zaleznosciach), a my tylko nakladamy sufit
+# na sam pakiet `mcp` — i to wystarcza, bo to jego wersja 2.x wywalala import FastMCP.

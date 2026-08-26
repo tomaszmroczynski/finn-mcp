@@ -1,0 +1,4 @@
+# Token dostepowy trzymamy WYLACZNIE w .env na NAS-ie i w menedzerze hasel.
+.env
+.env.*
+!.env.example

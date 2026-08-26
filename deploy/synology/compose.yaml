@@ -1,0 +1,32 @@
+# Compose UPSTREAMU z jedna zmiana: przekazaniem nazwy hosta do budowania
+# (patrz WARSTWA WDROZENIOWA 2/2 w Dockerfile). Reszta bez zmian.
+#
+# Wszystkie wartosci pochodza z .env, ktorego NIE MA w repozytorium.
+services:
+  finn-mcp:
+    build:
+      context: .
+      args:
+        # Domena, pod ktora serwer jest wystawiony przez reverse proxy.
+        # Bez niej SDK odrzuca kazde zadanie zza proxy bledem 421.
+        FINN_MCP_ALLOWED_HOST: ${FINN_MCP_ALLOWED_HOST:?Ustaw FINN_MCP_ALLOWED_HOST w .env}
+    image: finn-mcp:local
+    container_name: finn-mcp
+    restart: unless-stopped
+    environment:
+      FINN_MCP_ACCESS_TOKEN: ${FINN_MCP_ACCESS_TOKEN:?Set FINN_MCP_ACCESS_TOKEN in .env}
+      FINN_CACHE_DB: /data/cache.sqlite
+      FINN_REQUESTS_PER_MINUTE: ${FINN_REQUESTS_PER_MINUTE:-20}
+      FINN_CACHE_RAW_HTML: "0"
+    ports:
+      - "127.0.0.1:${FINN_MCP_PORT:-8000}:8000"
+    volumes:
+      - ./data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
