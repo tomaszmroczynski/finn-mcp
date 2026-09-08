@@ -40,11 +40,10 @@ Zanim cokolwiek nadpiszesz, na NAS-ie:
 ```sh
 cd /volume1/docker/finn-mcp
 find . \( -path ./data -o -name __pycache__ \) -prune -o -type f -print | sort
-for f in $(find src tests -name '*.py'); do printf '%s  %s
-' "$(tr -d '' < "$f" | sha256sum | cut -d' ' -f1)" "$f"; done
+for f in $(find src tests -name '*.py'); do printf '%s  %s\n' "$(tr -d '\r' < "$f" | sha256sum | cut -d' ' -f1)" "$f"; done
 ```
 
-**`tr -d ''` jest tu istotne.** Pliki trafily na NAS z Windowsa i maja CRLF;
+**`tr -d '\r'` jest tu istotne.** Pliki trafily na NAS z Windowsa i maja CRLF;
 bez zdjecia CR kazdy skrot rozni sie od gita i wszystko wyglada na zmienione.
 Po stronie repozytorium ten sam skrot daje `git show <commit>:<sciezka> | sha256sum`.
 
