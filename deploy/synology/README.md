@@ -25,9 +25,11 @@ Stan na 8 wrzesnia 2026:
   w forku, bajt w bajt, razem z `tests/test_http_server.py`. Domena
   z `allowed_hosts` przeszla z recznie edytowanego `server.py` do
   `http_server.py` i przychodzi z `FINN_MCP_ALLOWED_HOST` w czasie dzialania.
-- **Na NAS-ie sa jeszcze inne pliki z recznymi zmianami spoza gita.** Dziewiec
-  plikow utwardzenia nie pasuje do zadnego commitu. Dopoki nie porownane
-  z forkiem plik po pliku (patrz „Inwentaryzacja" nizej), **nie nadpisuj `src/`**.
+- **Inwentaryzacja NAS-a zrobiona 8 wrzesnia — fork zawiera wszystko, co NAS.**
+  Z dziewieciu plikow, ktorych skroty nie pasowaly do zadnego commitu, siedem
+  okazalo sie identycznych z commitem z 30 lipca po zdjeciu CR. Dwie realne
+  roznice — `allowed_origins` w `server.py` i sufit `mcp<2` w `pyproject.toml` —
+  sa juz w forku. Nakladanie forka na NAS niczego nie gubi.
 
 ## Inwentaryzacja przed nadpisaniem
 
