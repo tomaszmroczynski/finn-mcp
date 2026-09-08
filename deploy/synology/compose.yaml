@@ -18,6 +18,10 @@ services:
       FINN_CACHE_DB: /data/cache.sqlite
       FINN_REQUESTS_PER_MINUTE: ${FINN_REQUESTS_PER_MINUTE:-20}
       FINN_CACHE_RAW_HTML: "0"
+      # Ta sama wartosc co build arg wyzej. Od wrzesnia 2026 http_server.py
+      # czyta ja w czasie dzialania; latka z etapu budowania zostaje jako pas
+      # bezpieczenstwa, wiec zadna z dwoch drog nie jest jedyna.
+      FINN_MCP_ALLOWED_HOST: ${FINN_MCP_ALLOWED_HOST}
     ports:
       - "127.0.0.1:${FINN_MCP_PORT:-8000}:8000"
     volumes:
