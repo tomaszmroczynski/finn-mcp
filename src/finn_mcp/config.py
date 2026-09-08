@@ -57,6 +57,22 @@ DEHYDRATED_STATE_STRICT = os.environ.get(
 MAX_STATE_B64_CHARS = _env_int("FINN_MAX_STATE_B64_CHARS", 12 * 1024 * 1024, 1024)
 MAX_STATE_BYTES = _env_int("FINN_MAX_STATE_BYTES", 8 * 1024 * 1024, 1024)
 
+# OAuth for custom connectors (claude.ai and any spec-following client). Off
+# unless the public URL is set: without it the HTTP server keeps answering to
+# the static bearer token only, exactly as before.
+PUBLIC_URL = os.environ.get("FINN_MCP_PUBLIC_URL", "").strip().rstrip("/")
+# What a person types on the /login page. Falls back to the access token so a
+# deployment that sets nothing new still works -- but a separate secret means
+# the machine token never has to be typed into a browser.
+LOGIN_SECRET = (
+    os.environ.get("FINN_MCP_LOGIN_SECRET", "").strip()
+    or os.environ.get("FINN_MCP_ACCESS_TOKEN", "")
+)
+OAUTH_LOGIN_TTL_SECONDS = _env_int("FINN_OAUTH_LOGIN_TTL_SECONDS", 10 * 60, 60)
+OAUTH_CODE_TTL_SECONDS = _env_int("FINN_OAUTH_CODE_TTL_SECONDS", 5 * 60, 30)
+OAUTH_ACCESS_TTL_SECONDS = _env_int("FINN_OAUTH_ACCESS_TTL_SECONDS", 60 * 60, 60)
+OAUTH_REFRESH_TTL_SECONDS = _env_int("FINN_OAUTH_REFRESH_TTL_SECONDS", 30 * 24 * 60 * 60, 3600)
+
 
 def data_dir() -> Path:
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
@@ -70,6 +86,12 @@ def cache_db_path() -> Path:
     if override:
         return Path(override)
     return data_dir() / "cache.sqlite"
+
+
+def oauth_db_path() -> Path:
+    """Next to the cache database, so it lands on the same persistent volume."""
+    override = os.environ.get("FINN_MCP_OAUTH_DB")
+    return Path(override) if override else cache_db_path().with_name("oauth.sqlite")
 
 
 def backend_name() -> str:

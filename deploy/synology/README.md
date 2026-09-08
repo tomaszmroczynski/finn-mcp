@@ -202,6 +202,36 @@ Caly lancuch od zewnatrz:
 npm run finn:check     # w C:\AI\Ripperdoc\ripperdoc-strona
 ```
 
+## Custom connector w claude.ai (OAuth)
+
+Custom connector w claude.ai i w aplikacji Claude nie przyjmuje stalego tokenu:
+laczy sie z serwerow Anthropic i przechodzi pelny OAuth 2.1 (PKCE, rejestracja
+dynamiczna, metadane RFC 9728/8414). Serwer jest wlasnym serwerem autoryzacyjnym
+— bez zewnetrznego dostawcy tozsamosci, w tym samym kontenerze, stan
+w `/data/oauth.sqlite`.
+
+Wlacza sie to dwiema zmiennymi w `.env` (patrz `.env.example`):
+`FINN_MCP_PUBLIC_URL=https://<domena>` i `FINN_MCP_LOGIN_SECRET`. Bez nich
+serwer zachowuje sie dokladnie jak dotad. Token statyczny dziala rownolegle —
+strona na Vercelu, Claude Code i Codex niczego nie zauwaza.
+
+Dodanie connectora: w claude.ai Settings → Connectors → Add custom connector,
+adres `https://<domena>/mcp`, pola OAuth Client ID/Secret puste (rejestracja
+jest dynamiczna). Przegladarka trafi na `/login`, gdzie wpisujesz
+`FINN_MCP_LOGIN_SECRET` — raz na connector. Tokeny dostepowe zyja godzine,
+odswiezajace 30 dni i sa rotowane.
+
+Sprawdzenie, ze dziala, z dowolnego miejsca:
+
+```sh
+curl -s https://<domena>/.well-known/oauth-protected-resource/mcp
+curl -s https://<domena>/.well-known/oauth-authorization-server
+```
+
+Oba maja oddac JSON (nie 401). Cofniecie dostepu jednego connectora: usunac
+go w claude.ai; wszystkich naraz: zmienic `FINN_MCP_LOGIN_SECRET` nie uniewaznia
+juz wydanych tokenow — do tego usun `/data/oauth.sqlite` i zrestartuj kontener.
+
 ## Aktualizacja upstreamu
 
 Zrodla nie sa juz kopiowane recznie — to repozytorium jest forkiem, wiec

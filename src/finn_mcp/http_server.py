@@ -1,9 +1,18 @@
 """Authenticated Streamable HTTP entry point, for running behind a reverse proxy.
 
 Upstream ships a stdio server. This module is what lets the same server sit in
-a container behind Cloudflare and a Synology reverse proxy: one bearer token
-for every request, and the proxy's public host name admitted past the SDK's
+a container behind Cloudflare and a Synology reverse proxy: a bearer token on
+every request, and the proxy's public host name admitted past the SDK's
 DNS-rebinding guard.
+
+Two modes, chosen by FINN_MCP_PUBLIC_URL:
+
+* unset -- one static deployment token, checked by BearerAuthMiddleware below.
+  This is what has run in production since July.
+* set -- the server is also its own OAuth 2.1 authorization server (see
+  oauth.py), so clients that cannot carry a static token, such as claude.ai
+  custom connectors, can log in through a browser. The static token keeps
+  working alongside; nothing that used it has to change.
 
 Run with:  uvicorn finn_mcp.http_server:create_app --factory
 """
@@ -18,6 +27,7 @@ from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from . import config
 from .server import mcp
 
 # The SDK's own defaults, repeated so that naming a public host does not
@@ -59,7 +69,12 @@ def _transport_security() -> TransportSecuritySettings:
 
 
 class BearerAuthMiddleware:
-    """Require one deployment-local bearer token for every HTTP request."""
+    """Require one deployment-local bearer token for every HTTP request.
+
+    The static-token mode. Kept as the plain, dependency-free path: when no
+    public URL is configured there is no authorization server to expose, and
+    a middleware that refuses everything without the token is the whole story.
+    """
 
     def __init__(self, app: ASGIApp, token: str) -> None:
         self.app = app
@@ -89,7 +104,51 @@ class BearerAuthMiddleware:
         await self.app(scope, receive, send)
 
 
+def _enable_oauth(static_token: str) -> None:
+    """Turn the shared FastMCP instance into an OAuth authorization server.
+
+    Injected after construction, the same way transport security is, so
+    server.py stays transport-agnostic and identical to a stdio deployment.
+    The SDK mounts /authorize, /token, /register, /revoke and both
+    /.well-known documents from these settings; only /login is ours.
+    """
+    from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
+
+    from .oauth import SCOPE, DualTokenVerifier, FinnAuthorizationServer, Store, login_routes
+
+    public_url = config.PUBLIC_URL
+    resource = f"{public_url}/mcp"
+    provider = FinnAuthorizationServer(
+        Store(config.oauth_db_path()), public_url, resource, config.LOGIN_SECRET
+    )
+    mcp._auth_server_provider = provider
+    mcp._token_verifier = DualTokenVerifier(static_token, provider)
+    mcp.settings.auth = AuthSettings(
+        issuer_url=public_url,
+        resource_server_url=resource,
+        client_registration_options=ClientRegistrationOptions(
+            enabled=True, valid_scopes=[SCOPE], default_scopes=[SCOPE]
+        ),
+        revocation_options=RevocationOptions(enabled=True),
+        required_scopes=None,
+    )
+
+    # Registered once per process; the handlers fetch the current provider
+    # from the instance on every request, so re-running create_app (tests,
+    # a future reload) re-configures them without re-registering routes.
+    if not any(getattr(r, "path", None) == "/login" for r in mcp._custom_starlette_routes):
+        get_login, post_login = login_routes(lambda: mcp._auth_server_provider)
+        mcp.custom_route("/login", methods=["GET"], include_in_schema=False)(get_login)
+        mcp.custom_route("/login", methods=["POST"], include_in_schema=False)(post_login)
+
+
 def create_app() -> ASGIApp:
     """Build the authenticated Streamable HTTP application for uvicorn."""
     mcp.settings.transport_security = _transport_security()
-    return BearerAuthMiddleware(mcp.streamable_http_app(), _access_token())
+    static_token = _access_token()
+
+    if not config.PUBLIC_URL:
+        return BearerAuthMiddleware(mcp.streamable_http_app(), static_token)
+
+    _enable_oauth(static_token)
+    return mcp.streamable_http_app()

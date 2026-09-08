@@ -22,6 +22,9 @@ services:
       # czyta ja w czasie dzialania; latka z etapu budowania zostaje jako pas
       # bezpieczenstwa, wiec zadna z dwoch drog nie jest jedyna.
       FINN_MCP_ALLOWED_HOST: ${FINN_MCP_ALLOWED_HOST}
+      # OAuth dla custom connectorow; puste wartosci = wylaczone, jak dotad.
+      FINN_MCP_PUBLIC_URL: ${FINN_MCP_PUBLIC_URL:-}
+      FINN_MCP_LOGIN_SECRET: ${FINN_MCP_LOGIN_SECRET:-}
     ports:
       - "127.0.0.1:${FINN_MCP_PORT:-8000}:8000"
     volumes:
