@@ -63,9 +63,12 @@ def test_allowed_hosts_come_from_the_environment(monkeypatch):
     assert "127.0.0.1:*" in _transport_security().allowed_hosts
 
     monkeypatch.setenv("FINN_MCP_ALLOWED_HOST", " finn.example.no ; other.example ")
-    hosts = _transport_security().allowed_hosts
+    settings = _transport_security()
     for expected in ("finn.example.no", "finn.example.no:*", "other.example:*", "localhost:*"):
-        assert expected in hosts
+        assert expected in settings.allowed_hosts
+    # Browser clients send Origin; production admitted its own https origin.
+    assert "https://finn.example.no" in settings.allowed_origins
+    assert "http://localhost:*" in settings.allowed_origins
 
 
 def test_create_app_applies_transport_security(monkeypatch):

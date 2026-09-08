@@ -22,7 +22,9 @@ classifiers = [
 ]
 dependencies = [
     "httpx[http2]>=0.28.1",
-    "mcp[cli]>=1.27.0",
+    # <2: the 2.x SDK moved FastMCP to a separate package, so mcp.server.fastmcp
+    # stops importing and the server fails at startup. Lift when the import moves.
+    "mcp[cli]>=1.27.0,<2",
     "pydantic>=2.13.1",
     "selectolax>=0.4.7",
 ]

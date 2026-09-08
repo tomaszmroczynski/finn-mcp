@@ -23,6 +23,7 @@ from .server import mcp
 # The SDK's own defaults, repeated so that naming a public host does not
 # quietly drop loopback access for health checks and local debugging.
 _LOCAL_HOSTS = ("127.0.0.1:*", "localhost:*", "[::1]:*")
+_LOCAL_ORIGINS = ("http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*")
 
 
 def _access_token() -> str:
@@ -35,18 +36,9 @@ def _access_token() -> str:
 
 
 def _configured_hosts() -> list[str]:
-    """Public host names from FINN_MCP_ALLOWED_HOST, comma- or semicolon-separated.
-
-    Each is admitted with and without a port, because the Host header behind a
-    proxy may carry either form.
-    """
+    """Public host names from FINN_MCP_ALLOWED_HOST, comma- or semicolon-separated."""
     raw = os.environ.get("FINN_MCP_ALLOWED_HOST", "")
-    hosts: list[str] = []
-    for item in raw.replace(";", ",").split(","):
-        host = item.strip()
-        if host:
-            hosts.extend((host, f"{host}:*"))
-    return hosts
+    return [item.strip() for item in raw.replace(";", ",").split(",") if item.strip()]
 
 
 def _transport_security() -> TransportSecuritySettings:
@@ -54,9 +46,15 @@ def _transport_security() -> TransportSecuritySettings:
     # with 421 Invalid Host header. Behind a proxy that header is our public
     # domain, so it has to be admitted here -- from the environment, not
     # hardcoded, so the source carries no deployment-specific name.
+    #
+    # Each host is admitted with and without a port, because the Host header
+    # behind a proxy may carry either form, and its https origin is admitted
+    # too, mirroring what production ran with before this was configurable.
+    hosts = _configured_hosts()
     return TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=[*_LOCAL_HOSTS, *_configured_hosts()],
+        allowed_hosts=[*_LOCAL_HOSTS, *(h for host in hosts for h in (host, f"{host}:*"))],
+        allowed_origins=[*_LOCAL_ORIGINS, *(f"https://{host}" for host in hosts)],
     )
 
 
