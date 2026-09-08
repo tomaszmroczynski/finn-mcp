@@ -12,33 +12,45 @@ ktory wdraza.
 
 ---
 
-## ⚠ NAS chodzi na starym kodzie — nie aktualizuj go samego
+## ⚠ Zanim ruszysz NAS — przeczytaj do konca
 
-Kontener na `/volume1/docker/finn-mcp` zostal zbudowany przed zmianami z
-25 sierpnia i **nie wolno go zaktualizowac w oderwaniu od strony**.
+Stan na 8 wrzesnia 2026:
 
-`search_finn` zwracalo liste wynikow, a teraz zwraca `SearchResponse` — obiekt
-z polem `results` obok `total_matches`, `last_page`, `search_url` i `source`.
-Klient w `ripperdoc-strona/lib/finn/jobs.ts` ma stary podpis zapisany wprost
-w komentarzu („→ lista wynikow") i czyta odpowiedz jak liste. Przebudowa
-kontenera bez poprawienia klienta **zepsuje generator odpowiedzi na oferty
-pracy na ripperdoc.ai**.
+- **Klient jest juz poprawiony i wdrozony** (`ripperdoc-strona`, commit `7c9e3cd`):
+  `asArray` w `lib/finn/jobs.ts` czyta oba ksztalty odpowiedzi `search_finn` —
+  stara liste i nowy obiekt z `results`. Warunek „najpierw strona, potem
+  kontener" jest dotrzymany.
+- **`src/finn_mcp/http_server.py` istnialo wylacznie na NAS-ie.** To warstwa
+  HTTP z tokenem, bez ktorej kontener nie wstaje (`CMD` w Dockerfile). Jest juz
+  w forku, bajt w bajt, razem z `tests/test_http_server.py`. Domena
+  z `allowed_hosts` przeszla z recznie edytowanego `server.py` do
+  `http_server.py` i przychodzi z `FINN_MCP_ALLOWED_HOST` w czasie dzialania.
+- **Na NAS-ie sa jeszcze inne pliki z recznymi zmianami spoza gita.** Dziewiec
+  plikow utwardzenia nie pasuje do zadnego commitu. Dopoki nie porownane
+  z forkiem plik po pliku (patrz „Inwentaryzacja" nizej), **nie nadpisuj `src/`**.
 
-Kolejnosc, ktora dziala:
+## Inwentaryzacja przed nadpisaniem
 
-1. popraw `lib/finn/jobs.ts` tak, zeby czytal `response.results`
-2. dopiero potem przebuduj kontener z nowych zrodel
-3. sprawdz `npm run finn:check` po stronie strony
+To jest krok, ktorego brak kosztowalby kontener. Katalog na NAS-ie nie jest
+klonem gita — to kopia, w ktorej przez tygodnie robilo sie poprawki na zywo.
+Kazda z nich istnieje w jednym egzemplarzu i znika przy pierwszym `cp -r`.
 
-Do tej samej porcji pracy nalezy kontekst budowania. `compose.yaml` ma
-`context: .`, bo na NAS-ie zrodla i te pliki leza razem w jednym katalogu
-(`/volume1/docker/finn-mcp`). Po przenosinach tutaj naturalnym kontekstem jest
-korzen repozytorium — ale to zmiana w dzialajacym wdrozeniu, wiec idzie razem
-z punktami wyzej, a nie osobno.
+Zanim cokolwiek nadpiszesz, na NAS-ie:
 
-Przy okazji warto wykorzystac to, na co ten sam plik dzis narzeka w komentarzu
-(„dla ofert pracy nie maja oczywistego klucza na lokalizacje"): klucz istnieje,
-nazywa sie `location`, a nowe narzedzie `discover_filters` wypisuje jego kody.
+```sh
+cd /volume1/docker/finn-mcp
+find . \( -path ./data -o -name __pycache__ \) -prune -o -type f -print | sort
+for f in $(find src tests -name '*.py'); do printf '%s  %s
+' "$(tr -d '' < "$f" | sha256sum | cut -d' ' -f1)" "$f"; done
+```
+
+**`tr -d ''` jest tu istotne.** Pliki trafily na NAS z Windowsa i maja CRLF;
+bez zdjecia CR kazdy skrot rozni sie od gita i wszystko wyglada na zmienione.
+Po stronie repozytorium ten sam skrot daje `git show <commit>:<sciezka> | sha256sum`.
+
+Regula: plik, ktorego skrot nie pasuje do zadnego commitu, **czytasz przed
+nadpisaniem** i — jesli niesie cos wartosciowego — najpierw commitujesz do
+forka. Dopiero wtedy fork jest kompletnym zrodlem i mozna z niego wdrazac.
 
 ## Po co to istnieje
 
@@ -95,14 +107,25 @@ niczego zmienic, i tak ma byc.
 
 ## Wdrozenie
 
-Skopiuj zawartosc tego katalogu do `/volume1/docker/finn-mcp/` (nadpisujac
-`Dockerfile` i `compose.yaml` upstreamu), uzupelnij `.env`, potem:
+Zrodla przychodza z forka, a katalog na NAS-ie sie **naklada**, nie zastepuje:
+`.env`, `data/` (baza z zapisanymi wyszukiwaniami) i `.dockerignore` zostaja.
+Najpierw kopia zapasowa — to jedyna droga powrotu, bo NAS nie ma gita.
 
 ```sh
 cd /volume1/docker/finn-mcp
+tar czf /volume1/docker/finn-mcp-backup-$(date +%Y%m%d-%H%M).tgz --exclude=./data .
+curl -L https://github.com/tomaszmroczynski/finn-mcp/archive/refs/heads/master.tar.gz | tar xz -C /tmp
+cp -r /tmp/finn-mcp-master/src/. ./src/
+cp -r /tmp/finn-mcp-master/tests/. ./tests/
+cp /tmp/finn-mcp-master/pyproject.toml /tmp/finn-mcp-master/README.md /tmp/finn-mcp-master/LICENSE /tmp/finn-mcp-master/uv.lock .
+cp /tmp/finn-mcp-master/deploy/synology/Dockerfile /tmp/finn-mcp-master/deploy/synology/compose.yaml /tmp/finn-mcp-master/deploy/synology/constraints.txt /tmp/finn-mcp-master/deploy/synology/patch_allowed_hosts.py .
 sudo docker compose build --no-cache
 sudo docker compose up -d --force-recreate
 ```
+
+Forma `src/.` → `./src/` scala zawartosc do istniejacego katalogu; `cp -r src .`
+przy istniejacym `./src` robi to samo, ale zapis z kropka nie zostawia miejsca
+na watpliwosc.
 
 **`--no-cache` nie jest ostroznoscia, tylko warunkiem.** Bez niego Docker
 zostawia stara warstwe `pip install` i zmiana ograniczen wersji nie ma zadnego
@@ -114,6 +137,11 @@ zobaczyl nowy token.
 
 W logu budowania musi pojawic sie linia `patch_allowed_hosts: dopisano …`.
 Jesli jej nie ma, latka nie zadzialala i nie ma sensu isc dalej.
+
+Od wrzesnia 2026 latka jest pasem bezpieczenstwa, nie jedyna droga:
+`http_server.py` czyta `FINN_MCP_ALLOWED_HOST` w czasie dzialania, a
+`compose.yaml` przekazuje te zmienna takze do srodowiska kontenera. Zadna
+z dwoch drog nie jest sama jedna, wiec pominiecie jednej nie konczy sie 421.
 
 ## Czy na pewno budujesz TYM Dockerfile'em
 
