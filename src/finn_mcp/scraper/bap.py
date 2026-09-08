@@ -6,7 +6,14 @@ from typing import Any
 from selectolax.parser import HTMLParser, Node
 
 from ..models import Listing
-from .base import VerticalScraper, _clean, now_utc, parse_price_nok, pick_doc_fields
+from .base import (
+    VerticalScraper,
+    _clean,
+    description_from_dom,
+    now_utc,
+    parse_price_nok,
+    pick_doc_fields,
+)
 from .jsonld import extract_jsonld, find_by_type
 
 
@@ -96,11 +103,16 @@ class BapScraper(VerticalScraper):
                 if name:
                     attributes[str(name).lower()] = value
 
+        tree = HTMLParser(html)
         if title is None:
-            tree = HTMLParser(html)
             h1 = tree.css_first("h1")
             if h1:
                 title = _clean(h1.text(strip=True))
+        # Product.description in the JSON-LD is an SEO snippet cut at 160
+        # characters, mid-word. The seller's actual text is only in the page.
+        rendered = description_from_dom(tree)
+        if rendered and (description is None or len(rendered) > len(description)):
+            description = rendered
         if price is None:
             price = parse_price_nok(html)
 

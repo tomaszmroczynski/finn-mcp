@@ -6,7 +6,14 @@ from typing import Any
 from selectolax.parser import HTMLParser, Node
 
 from ..models import Listing
-from .base import VerticalScraper, _clean, now_utc, parse_price_nok, pick_doc_fields
+from .base import (
+    VerticalScraper,
+    _clean,
+    description_from_dom,
+    now_utc,
+    parse_price_nok,
+    pick_doc_fields,
+)
 from .jsonld import extract_jsonld, find_by_type
 
 
@@ -91,6 +98,11 @@ class _CarsBase(VerticalScraper):
             h1 = tree.css_first("h1")
             if h1:
                 title = _clean(h1.text(strip=True))
+        # Car pages carry no description in their JSON-LD at all; the dealer's
+        # text exists only in the rendered page.
+        rendered = description_from_dom(tree)
+        if rendered and (description is None or len(rendered) > len(description)):
+            description = rendered
 
         # Pull any labelled attribute rows (year, mileage, fuel, transmission, etc.)
         for tid, key in (

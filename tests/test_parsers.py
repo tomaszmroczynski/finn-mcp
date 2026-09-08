@@ -155,3 +155,32 @@ def test_parse_price_nok_variants():
     assert parse_price_nok("400 000 |  | kr") == 400_000
     assert parse_price_nok("no price here") is None
     assert parse_price_nok(None) is None
+
+
+# ---------- descriptions come from the page, not the 160-char SEO snippet ----------
+
+def test_bap_detail_description_is_the_sellers_full_text():
+    """finn.no's JSON-LD Product.description is cut at 160 characters, mid-word.
+
+    On this fixture it ends in "• Frak" -- the seller wrote "Frakt". The
+    rendered page has the whole text and that is what must come back.
+    """
+    from finn_mcp.scraper.jsonld import extract_jsonld, find_by_type
+
+    html = read_fixture("bap_item.html")
+    snippet = find_by_type(extract_jsonld(html), "Product")["description"]
+    assert len(snippet) == 160, "fixture no longer proves anything"
+
+    listing = get_scraper("bap").parse_detail("460211124", html)
+    assert listing.description and len(listing.description) > len(snippet)
+    assert not listing.description.endswith("Frak")
+    assert "Frakt" in listing.description
+    # The "show more" control is chrome, not content.
+    assert "visuell effekt" not in listing.description
+
+
+def test_cars_detail_description_is_read_from_the_page():
+    """Car pages have no description in their JSON-LD at all; it used to come back None."""
+    html = read_fixture("mobility_item.html")
+    listing = get_scraper("cars_used").parse_detail("460212366", html)
+    assert listing.description and len(listing.description) > 1000

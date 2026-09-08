@@ -51,6 +51,49 @@ def _clean(text: str | None) -> str | None:
     return text or None
 
 
+def _clean_multiline(text: str | None) -> str | None:
+    """Like _clean, but keeps line breaks: ad text is written in lines and bullets."""
+    if text is None:
+        return None
+    text = text.replace("\xa0", " ").replace("​", "").replace("\r", "")
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split("\n")]
+    text = "\n".join(lines)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text or None
+
+
+# Selectors finn.no uses for the seller's own text on item pages, best first.
+# The JSON-LD Product.description on the same pages is an SEO snippet cut at
+# 160 characters, so the rendered page is the only place the whole text is.
+_DESCRIPTION_SELECTORS = (
+    '[data-testid="description"] .whitespace-pre-wrap',
+    '[data-testid="description"]',
+    ".whitespace-pre-wrap",
+)
+
+
+def description_from_dom(tree: HTMLParser) -> str | None:
+    """The seller's full description as rendered, or None if no candidate is found.
+
+    Takes the longest candidate: the outer description container carries the
+    section heading and the "show more" control, which the inner
+    pre-wrapped block does not, and on car pages only the bare pre-wrapped
+    block exists.
+    """
+    best: str | None = None
+    for selector in _DESCRIPTION_SELECTORS:
+        for node in tree.css(selector):
+            for control in node.css('[data-testid="toggle-description"], button'):
+                control.decompose()
+            text = _clean_multiline(node.text(separator="\n", strip=True))
+            if text and (best is None or len(text) > len(best)):
+                best = text
+        if best is not None and selector != ".whitespace-pre-wrap":
+            # A hit inside the description container beats a page-wide guess.
+            return best
+    return best
+
+
 def parse_price_nok(text: str | None) -> int | None:
     """Extract an NOK price from text like '4 200 000 kr' or 'kr 17 500'.
 
